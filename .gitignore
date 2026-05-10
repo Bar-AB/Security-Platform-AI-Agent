@@ -34,6 +34,9 @@ chroma_db/
 # Jupyter
 .ipynb_checkpoints/
 
+# Temporary files
+temp/
+
 # macOS
 .DS_Store
 
