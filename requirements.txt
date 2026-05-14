@@ -6,6 +6,8 @@ openai>=1.40
 
 # Vector store & embeddings
 chromadb>=0.5
+langchain-text-splitters>=0.3
+langchain-community>=0.3
 
 # MCP
 mcp>=1.0
