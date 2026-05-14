@@ -16,7 +16,7 @@ class TestRAGIndexer:
     def test_indexer_creates_collection(self, docs_dir, chroma_dir):
         from rag.indexer import RAGIndexer
         with patch("rag.indexer.OpenAIEmbeddings") as mock_emb:
-            mock_emb.return_value.embed_documents.return_value = [[0.1] * 10]
+            mock_emb.return_value.embed_documents.side_effect = lambda texts: [[0.1] * 10 for _ in texts]
             mock_emb.return_value.embed_query.return_value = [0.1] * 10
             indexer = RAGIndexer(docs_dir=docs_dir, persist_dir=chroma_dir)
             indexer.build_index()
