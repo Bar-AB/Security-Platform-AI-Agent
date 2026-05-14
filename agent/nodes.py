@@ -59,6 +59,19 @@ class AgentNodes:
             logger.exception("RAG node failed for query: %s", query[:50])
             return {"rag_result": "Error retrieving documentation."}
 
+    def format_response(self, state: AgentState) -> dict:
+        query = state["messages"][-1].content
+        try:
+            response = self._formatter.invoke({
+                "query": query,
+                "mcp_result": state["mcp_result"] or "N/A",
+                "rag_result": state["rag_result"] or "N/A",
+            })
+            return {"final_response": response.content}
+        except Exception:
+            logger.exception("Formatter failed")
+            return {"final_response": "Sorry, I could not generate a response."}
+
     def _execute_tool_calls(self, tool_calls: list, tools: list) -> str:
         tool_map = {t.name: t for t in tools}
         results: list[str] = []

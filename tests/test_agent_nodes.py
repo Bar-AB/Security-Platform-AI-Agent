@@ -112,3 +112,99 @@ class TestRAGNode:
         result = nodes.rag_node(state)
         assert "rag_result" in result
         assert "No relevant" in result["rag_result"]
+
+
+class TestFormatResponse:
+    @pytest.fixture
+    def nodes(self):
+        llm = MagicMock()
+        llm.with_structured_output.return_value.invoke.return_value = MagicMock()
+        llm.invoke.return_value = MagicMock(content="Here are the critical issues found.")
+        from agent.nodes import AgentNodes
+        return AgentNodes(llm=llm, mcp_tools=MagicMock(), retriever=MagicMock())
+
+    def test_format_response_sets_final_response(self, nodes):
+        from agent.state import AgentState
+        state: AgentState = {
+            "messages": [HumanMessage("show me critical issues")],
+            "query_type": "data",
+            "mcp_result": '[{"id": "ISS-001", "severity": "critical"}]',
+            "rag_result": "",
+            "final_response": "",
+        }
+        result = nodes.format_response(state)
+        assert "final_response" in result
+        assert result["final_response"]
+
+    def test_format_response_handles_exception(self, nodes):
+        from agent.state import AgentState
+        nodes._llm.invoke.side_effect = Exception("LLM failure")
+        # Override the formatter chain to fail
+        nodes._formatter = MagicMock()
+        nodes._formatter.invoke.side_effect = Exception("Chain failure")
+        state: AgentState = {
+            "messages": [HumanMessage("query")],
+            "query_type": "data", "mcp_result": "", "rag_result": "", "final_response": "",
+        }
+        result = nodes.format_response(state)
+        assert "final_response" in result
+        assert "Sorry" in result["final_response"]
+
+
+class TestGraphRouting:
+    def test_graph_compiles(self):
+        from agent.graph import GraphBuilder
+        builder = GraphBuilder(
+            llm=MagicMock(),
+            mcp_tools=MagicMock(),
+            retriever=MagicMock(),
+        )
+        app = builder.build(with_memory=False)
+        assert app is not None
+
+    def test_graph_routes_data_to_mcp(self):
+        from agent.graph import GraphBuilder
+        from agent.state import AgentState
+        builder = GraphBuilder(
+            llm=MagicMock(),
+            mcp_tools=MagicMock(),
+            retriever=MagicMock(),
+        )
+        state: AgentState = {
+            "messages": [], "query_type": "data",
+            "mcp_result": "", "rag_result": "", "final_response": "",
+        }
+        assert builder._route_after_classify(state) == "mcp_node"
+
+    def test_graph_routes_doc_to_rag(self):
+        from agent.graph import GraphBuilder
+        from agent.state import AgentState
+        builder = GraphBuilder(
+            llm=MagicMock(),
+            mcp_tools=MagicMock(),
+            retriever=MagicMock(),
+        )
+        state: AgentState = {
+            "messages": [], "query_type": "doc",
+            "mcp_result": "", "rag_result": "", "final_response": "",
+        }
+        assert builder._route_after_classify(state) == "rag_node"
+
+    def test_graph_routes_mixed_mcp_then_rag(self):
+        from agent.graph import GraphBuilder
+        from agent.state import AgentState
+        builder = GraphBuilder(
+            llm=MagicMock(),
+            mcp_tools=MagicMock(),
+            retriever=MagicMock(),
+        )
+        state_mixed: AgentState = {
+            "messages": [], "query_type": "mixed",
+            "mcp_result": "", "rag_result": "", "final_response": "",
+        }
+        state_after_mcp: AgentState = {
+            "messages": [], "query_type": "mixed",
+            "mcp_result": "some data", "rag_result": "", "final_response": "",
+        }
+        assert builder._route_after_classify(state_mixed) == "mcp_node"
+        assert builder._route_after_mcp(state_after_mcp) == "rag_node"
