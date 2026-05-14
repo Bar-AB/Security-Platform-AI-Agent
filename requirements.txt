@@ -9,6 +9,7 @@ chromadb>=0.5
 
 # MCP
 mcp>=1.0
+langchain-mcp-adapters>=0.1
 
 # Mock server
 fastapi>=0.115
