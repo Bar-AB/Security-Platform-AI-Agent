@@ -31,6 +31,7 @@ class RAGIndexer:
             col = self._client.get_collection(_COLLECTION_NAME)
             return col.count() > 0
         except Exception:
+            logger.debug("Collection not found or not indexed", exc_info=True)
             return False
 
     def _load_documents(self) -> list[Document]:
@@ -64,6 +65,6 @@ class RAGIndexer:
         collection = self._client.create_collection(_COLLECTION_NAME)
         texts = [c.page_content for c in chunks]
         metadatas = [c.metadata for c in chunks]
-        embeddings = [self._embeddings.embed_documents([text])[0] for text in texts]
+        embeddings = self._embeddings.embed_documents(texts)
         ids = [f"chunk_{i}" for i in range(len(chunks))]
         collection.add(documents=texts, embeddings=embeddings, metadatas=metadatas, ids=ids)

@@ -4,6 +4,7 @@ from typing import Literal
 from langchain_core.language_models import BaseChatModel
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
+from langgraph.graph.state import CompiledStateGraph
 
 from agent.nodes import AgentNodes
 from agent.state import AgentState
@@ -22,7 +23,7 @@ class GraphBuilder:
     ) -> None:
         self._nodes = AgentNodes(llm=llm, mcp_tools=mcp_tools, retriever=retriever)
 
-    def build(self, with_memory: bool = True):
+    def build(self, with_memory: bool = True) -> CompiledStateGraph:
         graph = StateGraph(AgentState)
 
         graph.add_node("classify_query", self._nodes.classify_query)

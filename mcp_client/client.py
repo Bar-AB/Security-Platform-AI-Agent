@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 class MCPClient:
     def __init__(self, url: str, token: str) -> None:
         self._url = url
-        self._headers = {"Authorization": token}
+        self._headers = {"Authorization": f"Bearer {token}"}
 
     async def _call(self, tool_name: str, arguments: dict) -> list:
         async with streamablehttp_client(self._url, headers=self._headers) as (read, write, _):
