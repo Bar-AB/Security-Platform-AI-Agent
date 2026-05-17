@@ -1,3 +1,4 @@
+import Markdown from 'react-markdown'
 import type { Message, QueryType } from '../types'
 
 const BADGE_LABEL: Record<QueryType, string> = {
@@ -23,13 +24,13 @@ export function ChatMessage({ message }: Props) {
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
       <div className={`max-w-[75%] flex flex-col gap-1 ${isUser ? 'items-end' : 'items-start'}`}>
         <div
-          className={`px-4 py-3 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap ${
+          className={`px-4 py-3 rounded-2xl text-sm leading-relaxed ${
             isUser
               ? 'bg-[#1f6feb] text-white rounded-br-sm'
-              : 'bg-[#21262d] text-[#e6edf3] rounded-bl-sm'
+              : 'bg-[#21262d] text-[#e6edf3] rounded-bl-sm prose prose-sm prose-invert max-w-none'
           }`}
         >
-          {message.content}
+          {isUser ? message.content : <Markdown>{message.content}</Markdown>}
         </div>
         {!isUser && message.queryType && BADGE_LABEL[message.queryType] && (
           <span
