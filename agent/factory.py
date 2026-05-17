@@ -25,7 +25,11 @@ class AgentFactory:
         indexer = RAGIndexer(docs_dir=docs_dir, persist_dir=chroma_dir)
         if not indexer.is_indexed():
             logger.info("Building RAG index...")
-            indexer.build_index()
+            try:
+                indexer.build_index()
+            except Exception:
+                logger.exception("Failed to build RAG index — check DOCS_DIR=%s", docs_dir)
+                raise
 
         retriever = RAGRetriever(persist_dir=chroma_dir)
         mcp_client = MCPClient(url=mcp_url, token=mcp_token)

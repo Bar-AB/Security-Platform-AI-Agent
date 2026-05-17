@@ -1,4 +1,3 @@
-import pytest
 from unittest.mock import MagicMock, patch
 
 from agent.factory import AgentFactory
@@ -17,3 +16,14 @@ class TestAgentFactory:
             mock_builder.return_value.build.return_value = mock_graph
             result = AgentFactory.build()
             assert result is mock_graph
+
+    def test_build_triggers_indexing_when_not_indexed(self):
+        with patch("agent.factory.RAGIndexer") as mock_idx, \
+             patch("agent.factory.RAGRetriever"), \
+             patch("agent.factory.MCPClient"), \
+             patch("agent.factory.SecurityMCPTools"), \
+             patch("agent.factory.ChatOpenAI"), \
+             patch("agent.factory.GraphBuilder"):
+            mock_idx.return_value.is_indexed.return_value = False
+            AgentFactory.build()
+            mock_idx.return_value.build_index.assert_called_once()
