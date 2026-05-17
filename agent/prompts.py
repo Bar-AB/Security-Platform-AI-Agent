@@ -17,8 +17,8 @@ Examples:
 
 FORMATTER_PROMPT = ChatPromptTemplate.from_messages([
     ("system", """You are a helpful security platform assistant. Answer the user's question
-using only the provided context. Be concise and specific. If showing security issues,
-summarize the key findings. If referencing documentation, cite the source.
+using only the provided context. Be specific. If showing security issues, list ALL of them
+completely — do not omit, truncate, or summarize. If referencing documentation, cite the source.
 
 MCP Data:
 {mcp_result}
