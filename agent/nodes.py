@@ -65,16 +65,48 @@ class AgentNodes:
 
     def format_response(self, state: AgentState) -> dict:
         query = state["messages"][-1].content
+        mcp_result = state.get("mcp_result") or "N/A"
+        rag_result = state.get("rag_result") or "N/A"
         try:
+            # Pure data queries: format deterministically so no items get dropped by LLM summarization
+            if rag_result == "N/A" and mcp_result != "N/A":
+                return {"final_response": self._format_mcp_as_markdown(mcp_result)}
             response = self._formatter.invoke({
                 "query": query,
-                "mcp_result": state.get("mcp_result") or "N/A",
-                "rag_result": state.get("rag_result") or "N/A",
+                "mcp_result": mcp_result,
+                "rag_result": rag_result,
             })
             return {"final_response": response.content}
         except Exception:
             logger.exception("Formatter failed")
             return {"final_response": "Sorry, I could not generate a response."}
+
+    def _format_mcp_as_markdown(self, mcp_result: str) -> str:
+        sections: list[str] = []
+        for chunk in mcp_result.split("\n\n"):
+            chunk = chunk.strip()
+            if not chunk:
+                continue
+            header, _, body = chunk.partition("\n")
+            tool_name = header.strip("[]").replace("_", " ").title()
+            try:
+                items: list[dict] = json.loads(body)
+            except (json.JSONDecodeError, ValueError):
+                sections.append(chunk)
+                continue
+            if not items:
+                sections.append(f"**{tool_name}:** No results found.")
+                continue
+            lines = [f"**{tool_name}** — {len(items)} result{'s' if len(items) != 1 else ''}:\n"]
+            for idx, item in enumerate(items, 1):
+                fields = "  \n".join(
+                    f"  - **{k.replace('_', ' ').title()}**: {v}"
+                    for k, v in item.items()
+                    if v is not None
+                )
+                lines.append(f"**{idx}.** {fields}\n")
+            sections.append("\n".join(lines))
+        return "\n\n---\n\n".join(sections)
 
     def _try_generate_chart(self, mcp_result: str) -> None:
         try:
