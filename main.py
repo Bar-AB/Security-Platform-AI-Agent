@@ -4,39 +4,13 @@ import sys
 
 from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage
-from langchain_openai import ChatOpenAI
 
-from agent.graph import GraphBuilder
-from mcp_client.client import MCPClient
-from mcp_client.tools import SecurityMCPTools
-from rag.indexer import RAGIndexer
-from rag.retriever import RAGRetriever
+from agent.factory import AgentFactory
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 load_dotenv()
-
-
-def _build_agent():
-    docs_dir = os.getenv("DOCS_DIR", "./docs")
-    chroma_dir = os.getenv("CHROMA_PERSIST_DIR", "./chroma_db")
-    mcp_url = os.getenv("MCP_SERVER_URL", "http://localhost:8000/mcp")
-    mcp_token = os.getenv("MCP_AUTH_TOKEN", "mock-token")
-
-    indexer = RAGIndexer(docs_dir=docs_dir, persist_dir=chroma_dir)
-    if not indexer.is_indexed():
-        print("Building RAG index (first run)...")
-        indexer.build_index()
-        print("Index ready.\n")
-
-    retriever = RAGRetriever(persist_dir=chroma_dir)
-    mcp_client = MCPClient(url=mcp_url, token=mcp_token)
-    mcp_tools = SecurityMCPTools(client=mcp_client)
-    llm = ChatOpenAI(model="gpt-4o", temperature=0)
-
-    builder = GraphBuilder(llm=llm, mcp_tools=mcp_tools, retriever=retriever)
-    return builder.build(with_memory=True)
 
 
 def main() -> None:
@@ -47,7 +21,7 @@ def main() -> None:
     print("Security Platform AI Agent")
     print("Type 'exit' to quit.\n")
 
-    app = _build_agent()
+    app = AgentFactory.build()
     config = {"configurable": {"thread_id": "session-1"}}
 
     while True:
