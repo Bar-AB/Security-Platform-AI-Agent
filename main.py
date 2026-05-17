@@ -44,7 +44,7 @@ def main() -> None:
             )
             response = result.get("final_response", "No response generated.")
             print(f"\nAgent: {response}\n")
-        except Exception:
+        except Exception:  # broad catch intentional: CLI loop must not crash on any agent error
             logger.exception("Agent invocation failed")
             print("Agent: Something went wrong. Is the mock server running?\n")
 

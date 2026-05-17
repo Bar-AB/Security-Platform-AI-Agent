@@ -27,8 +27,8 @@ class AgentFactory:
             logger.info("Building RAG index...")
             try:
                 indexer.build_index()
-            except Exception:
-                logger.exception("Failed to build RAG index — check DOCS_DIR=%s", docs_dir)
+            except (OSError, RuntimeError):
+                logger.exception("Failed to build RAG index from %s", docs_dir)
                 raise
 
         retriever = RAGRetriever(persist_dir=chroma_dir)
