@@ -20,15 +20,20 @@ class MCPClient:
                 result = await session.call_tool(tool_name, arguments)
                 if not result.content:
                     return []
-                # FastMCP returns TextContent objects; extract and parse the JSON text
-                first = result.content[0]
-                if not hasattr(first, "text"):
-                    return []
-                try:
-                    parsed = json.loads(first.text)
-                    return parsed if isinstance(parsed, list) else [parsed]
-                except (json.JSONDecodeError, ValueError):
-                    return [first.text]
+                # FastMCP returns one TextContent per item, not a single JSON array
+                items: list = []
+                for content in result.content:
+                    if not hasattr(content, "text"):
+                        continue
+                    try:
+                        parsed = json.loads(content.text)
+                        if isinstance(parsed, list):
+                            items.extend(parsed)
+                        else:
+                            items.append(parsed)
+                    except (json.JSONDecodeError, ValueError):
+                        items.append(content.text)
+                return items
 
     def call_tool_sync(self, tool_name: str, arguments: dict) -> list:
         try:
