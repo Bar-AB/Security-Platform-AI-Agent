@@ -2,6 +2,7 @@ import json
 import logging
 
 from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import SystemMessage
 
 from agent.charts import SecurityCharts
 from agent.prompts import CLASSIFIER_PROMPT, FORMATTER_PROMPT
@@ -37,12 +38,20 @@ class AgentNodes:
             logger.exception("Classification failed, defaulting to 'mixed'")
             return {"query_type": "mixed"}
 
+    _MCP_SYSTEM = SystemMessage(
+        "You are a security analyst with access to three tools: get_security_issues, "
+        "get_applications, and get_pipeline_issues. For any query about 'all issues', "
+        "'critical issues', or general security findings, you MUST call BOTH "
+        "get_security_issues AND get_pipeline_issues to give a complete answer. "
+        "Always pass the relevant filters (e.g. severity='critical')."
+    )
+
     def mcp_node(self, state: AgentState) -> dict:
         query = state["messages"][-1].content
         tools = self._mcp_tools.as_langchain_tools()
         try:
             llm_with_tools = self._llm.bind_tools(tools)
-            response = llm_with_tools.invoke(state["messages"])
+            response = llm_with_tools.invoke([self._MCP_SYSTEM, *state["messages"]])
             if response.tool_calls:
                 tool_results = self._execute_tool_calls(response.tool_calls, tools)
                 self._try_generate_chart(tool_results)
