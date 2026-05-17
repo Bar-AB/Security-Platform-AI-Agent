@@ -3,7 +3,7 @@ import { ChatMessage } from './components/ChatMessage'
 import { ChatInput } from './components/ChatInput'
 import { TypingIndicator } from './components/TypingIndicator'
 import { sendMessage } from './api'
-import type { Message } from './types'
+import type { Message, QueryType } from './types'
 
 const THREAD_ID = crypto.randomUUID()
 
@@ -33,7 +33,7 @@ export default function App() {
           id: crypto.randomUUID(),
           role: 'assistant',
           content: data.response,
-          queryType: data.query_type,
+          queryType: data.query_type as QueryType,
         },
       ])
     } catch {
@@ -80,7 +80,8 @@ export default function App() {
                 <button
                   key={hint}
                   onClick={() => handleSend(hint)}
-                  className="text-xs px-3 py-1.5 rounded-lg border border-[#30363d] text-[#58a6ff] hover:bg-[#161b22] transition-colors"
+                  disabled={isLoading}
+                  className="text-xs px-3 py-1.5 rounded-lg border border-[#30363d] text-[#58a6ff] hover:bg-[#161b22] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                 >
                   {hint}
                 </button>

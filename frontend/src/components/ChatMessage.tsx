@@ -1,12 +1,12 @@
-import type { Message } from '../types'
+import type { Message, QueryType } from '../types'
 
-const BADGE_LABEL: Record<string, string> = {
+const BADGE_LABEL: Record<QueryType, string> = {
   data: 'MCP',
   doc: 'RAG',
   mixed: 'Mixed',
 }
 
-const BADGE_COLOR: Record<string, string> = {
+const BADGE_COLOR: Record<QueryType, string> = {
   data: 'bg-[#388bfd] text-white',
   doc: 'bg-[#3fb950] text-white',
   mixed: 'bg-[#d29922] text-white',

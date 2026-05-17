@@ -35,4 +35,16 @@ describe('ChatInput', () => {
     expect(screen.getByRole('textbox')).toBeDisabled()
     expect(screen.getByRole('button', { name: /send/i })).toBeDisabled()
   })
+
+  it('does not call onSend when input is empty or whitespace', () => {
+    const onSend = vi.fn()
+    render(<ChatInput onSend={onSend} disabled={false} />)
+    const textarea = screen.getByRole('textbox')
+    // Enter on empty textarea
+    fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false })
+    // Enter on whitespace-only textarea
+    fireEvent.change(textarea, { target: { value: '   ' } })
+    fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false })
+    expect(onSend).not.toHaveBeenCalled()
+  })
 })

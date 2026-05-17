@@ -4,11 +4,18 @@ export interface ChatApiResponse {
 }
 
 export async function sendMessage(message: string, threadId: string): Promise<ChatApiResponse> {
-  const res = await fetch('/chat', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message, thread_id: threadId }),
-  })
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  return res.json() as Promise<ChatApiResponse>
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 30_000)
+  try {
+    const res = await fetch('/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message, thread_id: threadId }),
+      signal: controller.signal,
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    return res.json() as Promise<ChatApiResponse>
+  } finally {
+    clearTimeout(timer)
+  }
 }
