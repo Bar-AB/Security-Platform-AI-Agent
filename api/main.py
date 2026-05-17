@@ -1,4 +1,5 @@
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
@@ -25,6 +26,8 @@ class ChatResponse(BaseModel):
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
+    if not os.getenv("OPENAI_API_KEY"):
+        raise RuntimeError("OPENAI_API_KEY is not set. Add it to your .env file.")
     app.state.agent = AgentFactory.build()
     logger.info("Agent initialized")
     yield

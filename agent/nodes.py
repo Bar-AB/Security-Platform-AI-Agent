@@ -68,8 +68,8 @@ class AgentNodes:
         try:
             response = self._formatter.invoke({
                 "query": query,
-                "mcp_result": state["mcp_result"] or "N/A",
-                "rag_result": state["rag_result"] or "N/A",
+                "mcp_result": state.get("mcp_result") or "N/A",
+                "rag_result": state.get("rag_result") or "N/A",
             })
             return {"final_response": response.content}
         except Exception:
