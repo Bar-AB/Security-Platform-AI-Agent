@@ -1,6 +1,6 @@
 import pytest
 from fastapi.testclient import TestClient
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from agent.factory import AgentFactory
 from api.main import app
@@ -10,10 +10,10 @@ class TestChatEndpoint:
     @pytest.fixture
     def mock_agent(self):
         agent = MagicMock()
-        agent.invoke.return_value = {
+        agent.ainvoke = AsyncMock(return_value={
             "final_response": "Found 2 critical issues.",
             "query_type": "data",
-        }
+        })
         return agent
 
     @pytest.fixture
@@ -31,8 +31,16 @@ class TestChatEndpoint:
 
     def test_chat_passes_thread_id(self, client, mock_agent):
         client.post("/chat", json={"message": "test", "thread_id": "t-abc"})
-        _, kwargs = mock_agent.invoke.call_args
+        _, kwargs = mock_agent.ainvoke.call_args
         assert kwargs["config"]["configurable"]["thread_id"] == "t-abc"
+
+    def test_chat_returns_error_on_agent_failure(self, client, mock_agent):
+        mock_agent.ainvoke = AsyncMock(side_effect=RuntimeError("agent crashed"))
+        resp = client.post("/chat", json={"message": "test"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["query_type"] == "unknown"
+        assert "Something went wrong" in body["response"]
 
     def test_health_returns_ok(self, client):
         resp = client.get("/health")

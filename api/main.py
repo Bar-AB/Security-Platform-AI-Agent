@@ -40,15 +40,15 @@ app.add_middleware(
 
 
 @app.get("/health")
-def health() -> dict:
+def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
 @app.post("/chat", response_model=ChatResponse)
-def chat(req: ChatRequest, request: Request) -> ChatResponse:
+async def chat(req: ChatRequest, request: Request) -> ChatResponse:
     config = {"configurable": {"thread_id": req.thread_id}}
     try:
-        result = request.app.state.agent.invoke(
+        result = await request.app.state.agent.ainvoke(
             {"messages": [HumanMessage(req.message)]},
             config=config,
         )
