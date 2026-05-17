@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 
 from mcp import ClientSession
@@ -17,7 +18,17 @@ class MCPClient:
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 result = await session.call_tool(tool_name, arguments)
-                return result.content
+                if not result.content:
+                    return []
+                # FastMCP returns TextContent objects; extract and parse the JSON text
+                first = result.content[0]
+                if not hasattr(first, "text"):
+                    return []
+                try:
+                    parsed = json.loads(first.text)
+                    return parsed if isinstance(parsed, list) else [parsed]
+                except (json.JSONDecodeError, ValueError):
+                    return [first.text]
 
     def call_tool_sync(self, tool_name: str, arguments: dict) -> list:
         try:
