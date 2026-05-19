@@ -1,6 +1,7 @@
 import logging
 
 import chromadb
+from chromadb import QueryResult
 from langchain_core.documents import Document
 from langchain_openai import OpenAIEmbeddings
 
@@ -19,8 +20,8 @@ class RAGRetriever:
 
     def retrieve(self, query: str) -> list[Document]:
         query_embedding = self._embeddings.embed_query(query)
-        results = self._collection.query(
-            query_embeddings=[query_embedding],
+        results: QueryResult = self._collection.query(
+            query_embeddings=[query_embedding],  # type: ignore[arg-type]
             n_results=self._k,
             include=["documents", "metadatas", "distances"],
         )
@@ -35,10 +36,12 @@ class RAGRetriever:
             parts.append(f"{citation}\n{doc.page_content}")
         return "\n\n---\n\n".join(parts)
 
-    def _to_documents(self, results: dict) -> list[Document]:
-        docs: list[Document] = []
-        for text, metadata in zip(
-            results["documents"][0], results["metadatas"][0]
-        ):
-            docs.append(Document(page_content=text, metadata=metadata))
-        return docs
+    def _to_documents(self, results: QueryResult) -> list[Document]:
+        documents = results["documents"]
+        metadatas = results["metadatas"]
+        if not documents or not metadatas:
+            return []
+        return [
+            Document(page_content=text, metadata=meta)
+            for text, meta in zip(documents[0], metadatas[0])
+        ]

@@ -49,7 +49,7 @@ def health() -> dict[str, str]:
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest, request: Request) -> ChatResponse:
-    config = {"configurable": {"thread_id": req.thread_id}}
+    config = {"configurable": {"thread_id": req.thread_id}, "recursion_limit": 15}
     try:
         result = await request.app.state.agent.ainvoke(
             {"messages": [HumanMessage(req.message)]},

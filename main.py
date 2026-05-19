@@ -4,6 +4,7 @@ import sys
 
 from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage
+from langchain_core.runnables import RunnableConfig
 
 from agent.factory import AgentFactory
 
@@ -22,7 +23,7 @@ def main() -> None:
     print("Type 'exit' to quit.\n")
 
     app = AgentFactory.build()
-    config = {"configurable": {"thread_id": "session-1"}}
+    config: RunnableConfig = {"configurable": {"thread_id": "session-1"}, "recursion_limit": 15}
 
     while True:
         try:

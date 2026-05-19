@@ -1,6 +1,7 @@
 import json
 import logging
 from datetime import date
+from typing import cast
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import SystemMessage
@@ -28,11 +29,11 @@ class AgentNodes:
         self._charts = SecurityCharts()
 
     def classify_query(self, state: AgentState) -> dict:
-        query = state["messages"][-1].content
+        query = cast(str, state["messages"][-1].content)
         try:
             classifier = self._llm.with_structured_output(QueryClassification)
             prompt_value = CLASSIFIER_PROMPT.invoke({"query": query})
-            result: QueryClassification = classifier.invoke(prompt_value)
+            result = cast(QueryClassification, classifier.invoke(prompt_value))
             logger.info("Classified '%s' as '%s'", query[:50], result.query_type)
             return {"query_type": result.query_type, "docs_query": result.docs_query}
         except Exception:
@@ -90,7 +91,7 @@ class AgentNodes:
         )
 
     def mcp_node(self, state: AgentState) -> dict:
-        query = state["messages"][-1].content
+        query = cast(str, state["messages"][-1].content)
         tools = self._mcp_tools.as_langchain_tools()
         try:
             llm_with_tools = self._llm.bind_tools(tools)
@@ -105,7 +106,7 @@ class AgentNodes:
             return {"mcp_result": "Error fetching security data. The platform may be unavailable."}
 
     def rag_node(self, state: AgentState) -> dict:
-        query = state["messages"][-1].content
+        query = cast(str, state["messages"][-1].content)
         retrieval_query = state.get("docs_query") or query
         try:
             docs = self._retriever.retrieve(retrieval_query)
@@ -119,7 +120,7 @@ class AgentNodes:
     _AGGREGATION_KEYWORDS = frozenset(["how many", "how much", "in total", "total", "count", "how much there"])
 
     def format_response(self, state: AgentState) -> dict:
-        query = state["messages"][-1].content
+        query = cast(str, state["messages"][-1].content)
         mcp_result = state.get("mcp_result") or "N/A"
         rag_result = state.get("rag_result") or "N/A"
         try:

@@ -40,7 +40,7 @@ class GraphBuilder:
         graph.add_edge("format_response", END)
 
         checkpointer = MemorySaver() if with_memory else None
-        return graph.compile(checkpointer=checkpointer, recursion_limit=_MAX_STEPS)
+        return graph.compile(checkpointer=checkpointer)
 
     def _route_after_classify(self, state: AgentState) -> str | list[str]:
         qtype = state["query_type"]
