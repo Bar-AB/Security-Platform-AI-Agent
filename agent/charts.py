@@ -1,5 +1,8 @@
 import logging
+import subprocess
 
+import matplotlib
+matplotlib.use("agg")
 import matplotlib.pyplot as plt
 
 logger = logging.getLogger(__name__)
@@ -37,4 +40,8 @@ class SecurityCharts:
     def _save_fig(self, fig: plt.Figure, filename: str) -> str:
         fig.savefig(filename, dpi=100, bbox_inches="tight")
         plt.close(fig)
+        try:
+            subprocess.run(["open", filename], check=False)
+        except FileNotFoundError:
+            pass
         return filename
