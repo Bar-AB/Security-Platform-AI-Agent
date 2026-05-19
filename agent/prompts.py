@@ -8,10 +8,15 @@ Classify the user's query into exactly one type:
 - "doc": User wants to know HOW to use the platform (setup, connectors, dashboard, filters).
 - "mixed": User wants BOTH data AND documentation (e.g. explain a vulnerability category AND show examples).
 
+Also produce a docs_query: a refined search string for the documentation knowledge base.
+- "data" queries: set docs_query to the original query (it will not be used).
+- "doc" queries: rewrite as a concise keyword search focused on setup, configuration, or how-to aspects.
+- "mixed" queries: extract only the conceptual/documentation part; strip data-specific language.
+
 Examples:
-- "Show me critical issues" → data
-- "How do I connect Jira?" → doc
-- "What is SQL injection and how many do we have?" → mixed"""),
+- "Show me critical issues" → type: data, docs_query: "Show me critical issues"
+- "How do I connect Jira?" → type: doc, docs_query: "Jira connector setup configuration"
+- "What is SQL injection and how many do we have?" → type: mixed, docs_query: "SQL injection vulnerability explanation\""""),
     ("human", "{query}"),
 ])
 

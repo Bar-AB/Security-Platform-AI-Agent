@@ -34,10 +34,10 @@ class AgentNodes:
             prompt_value = CLASSIFIER_PROMPT.invoke({"query": query})
             result: QueryClassification = classifier.invoke(prompt_value)
             logger.info("Classified '%s' as '%s'", query[:50], result.query_type)
-            return {"query_type": result.query_type}
+            return {"query_type": result.query_type, "docs_query": result.docs_query}
         except Exception:
             logger.exception("Classification failed, defaulting to 'mixed'")
-            return {"query_type": "mixed"}
+            return {"query_type": "mixed", "docs_query": query}
 
     @staticmethod
     def _build_mcp_system() -> SystemMessage:
@@ -106,8 +106,9 @@ class AgentNodes:
 
     def rag_node(self, state: AgentState) -> dict:
         query = state["messages"][-1].content
+        retrieval_query = state.get("docs_query") or query
         try:
-            docs = self._retriever.retrieve(query)
+            docs = self._retriever.retrieve(retrieval_query)
             if not docs:
                 return {"rag_result": "No relevant documentation found."}
             return {"rag_result": self._retriever.format_for_prompt(docs)}
