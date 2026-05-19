@@ -44,3 +44,6 @@ temp/
 .idea/
 .vscode/
 *.swp
+
+# Superpowers planning docs (internal tooling, not relevant to reviewers)
+docs/superpowers/
