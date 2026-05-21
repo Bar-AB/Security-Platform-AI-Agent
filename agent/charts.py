@@ -2,6 +2,7 @@ import logging
 import subprocess
 
 import matplotlib
+
 matplotlib.use("agg")
 import matplotlib.pyplot as plt
 
@@ -25,7 +26,9 @@ class SecurityCharts:
         return self._save_fig(fig, "severity_distribution.png")
 
     def top_vulnerable_apps(self, applications: list[dict]) -> str:
-        apps = sorted(applications, key=lambda a: a.get("risk_score", 0), reverse=True)[:5]
+        apps = sorted(applications, key=lambda a: a.get("risk_score", 0), reverse=True)[
+            :5
+        ]
         names = [a["name"] for a in apps]
         scores = [a["risk_score"] for a in apps]
 

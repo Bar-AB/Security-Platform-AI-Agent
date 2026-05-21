@@ -5,7 +5,12 @@ from mcp.server.fastmcp import FastMCP
 from mock_server.data import MOCK_APPLICATIONS, MOCK_ISSUES, MOCK_PIPELINE_ISSUES
 from mock_server.models import Severity
 
-_SEVERITY_RANK = {Severity.CRITICAL: 0, Severity.HIGH: 1, Severity.MEDIUM: 2, Severity.LOW: 3}
+_SEVERITY_RANK = {
+    Severity.CRITICAL: 0,
+    Severity.HIGH: 1,
+    Severity.MEDIUM: 2,
+    Severity.LOW: 3,
+}
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +66,9 @@ def get_security_issues(
 
 
 @_mcp.tool()
-def get_applications(min_risk_score: float | None = None, limit: int | None = None) -> list[dict]:
+def get_applications(
+    min_risk_score: float | None = None, limit: int | None = None
+) -> list[dict]:
     """Get applications sorted by risk score descending (most vulnerable first).
     Optionally filter by minimum risk score (0-10) and/or cap results with limit."""
     apps = MOCK_APPLICATIONS
@@ -108,7 +115,12 @@ def get_pipeline_issues(
         issues = [i for i in issues if tool.lower() in i.tool.lower()]
     if branch:
         branch_lower = branch.lower()
-        issues = [i for i in issues if i.branch.lower().startswith(branch_lower) or branch_lower == i.branch.lower()]
+        issues = [
+            i
+            for i in issues
+            if i.branch.lower().startswith(branch_lower)
+            or branch_lower == i.branch.lower()
+        ]
     if keyword:
         kw = keyword.lower()
         issues = [i for i in issues if kw in i.title.lower()]

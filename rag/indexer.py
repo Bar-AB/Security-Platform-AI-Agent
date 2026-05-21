@@ -67,4 +67,6 @@ class RAGIndexer:
         metadatas = [c.metadata for c in chunks]
         embeddings = self._embeddings.embed_documents(texts)
         ids = [f"chunk_{i}" for i in range(len(chunks))]
-        collection.add(documents=texts, embeddings=embeddings, metadatas=metadatas, ids=ids)  # type: ignore[arg-type]
+        collection.add(
+            documents=texts, embeddings=embeddings, metadatas=metadatas, ids=ids
+        )  # type: ignore[arg-type]

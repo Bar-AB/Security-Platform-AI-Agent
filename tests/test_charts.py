@@ -1,6 +1,6 @@
 import os
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 
 class TestSecurityCharts:
@@ -8,6 +8,7 @@ class TestSecurityCharts:
     def charts(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         from agent.charts import SecurityCharts
+
         return SecurityCharts()
 
     def test_severity_distribution_creates_file(self, charts, tmp_path):
@@ -28,7 +29,9 @@ class TestSecurityCharts:
             {"severity": "high"},
             {"severity": "low"},
         ]
-        with patch.object(charts, "_save_fig", return_value="severity_distribution.png") as mock_save:
+        with patch.object(
+            charts, "_save_fig", return_value="severity_distribution.png"
+        ) as mock_save:
             charts.severity_distribution(issues)
             fig = mock_save.call_args[0][0]
             ax = fig.axes[0]
@@ -54,7 +57,9 @@ class TestSecurityCharts:
             {"name": "High", "risk_score": 9.8},
             {"name": "Mid", "risk_score": 5.5},
         ]
-        with patch.object(charts, "_save_fig", return_value="top_vulnerable_apps.png") as mock_save:
+        with patch.object(
+            charts, "_save_fig", return_value="top_vulnerable_apps.png"
+        ) as mock_save:
             charts.top_vulnerable_apps(apps)
             fig = mock_save.call_args[0][0]
             ax = fig.axes[0]

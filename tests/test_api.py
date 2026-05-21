@@ -10,10 +10,12 @@ class TestChatEndpoint:
     @pytest.fixture
     def mock_agent(self):
         agent = MagicMock()
-        agent.ainvoke = AsyncMock(return_value={
-            "final_response": "Found 2 critical issues.",
-            "query_type": "data",
-        })
+        agent.ainvoke = AsyncMock(
+            return_value={
+                "final_response": "Found 2 critical issues.",
+                "query_type": "data",
+            }
+        )
         return agent
 
     @pytest.fixture

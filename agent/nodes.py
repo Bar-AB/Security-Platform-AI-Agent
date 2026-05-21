@@ -30,15 +30,30 @@ class AgentNodes:
 
     def classify_query(self, state: AgentState) -> dict:
         query = cast(str, state["messages"][-1].content)
+        wants_chart = any(kw in query.lower() for kw in self._CHART_KEYWORDS)
         try:
             classifier = self._llm.with_structured_output(QueryClassification)
             prompt_value = CLASSIFIER_PROMPT.invoke({"query": query})
             result = cast(QueryClassification, classifier.invoke(prompt_value))
-            logger.info("Classified '%s' as '%s'", query[:50], result.query_type)
-            return {"query_type": result.query_type, "docs_query": result.docs_query}
+            query_type = result.query_type
+            if query_type == "chart" and any(
+                kw in query.lower() for kw in self._DATA_ENTITY_KEYWORDS
+            ):
+                query_type = "data"
+                logger.info("Overriding 'chart' → 'data': query contains data entities")
+            logger.info("Classified '%s' as '%s'", query[:50], query_type)
+            return {
+                "query_type": query_type,
+                "docs_query": result.docs_query,
+                "wants_chart": wants_chart,
+            }
         except Exception:
             logger.exception("Classification failed, defaulting to 'mixed'")
-            return {"query_type": "mixed", "docs_query": query}
+            return {
+                "query_type": "mixed",
+                "docs_query": query,
+                "wants_chart": wants_chart,
+            }
 
     @staticmethod
     def _build_mcp_system() -> SystemMessage:
@@ -85,8 +100,8 @@ class AgentNodes:
             "- When the user asks 'how many', 'how much', 'total', or 'count', always state the "
             "exact number clearly in your answer (e.g. 'There are 3 issues in auth-service: 1 security issue and 2 pipeline findings.').\n\n"
             "GENERAL FINDINGS:\n"
-            "- For 'all issues', 'critical issues', or any broad security query: "
-            "call BOTH get_security_issues AND get_pipeline_issues.\n\n"
+            "- For 'all issues' or unspecific queries: call BOTH get_security_issues AND get_pipeline_issues. "
+            "If the user says 'security issues', call ONLY get_security_issues.\n\n"
             "Never guess or fabricate data. If filters return no results, say so clearly."
         )
 
@@ -95,15 +110,20 @@ class AgentNodes:
         tools = self._mcp_tools.as_langchain_tools()
         try:
             llm_with_tools = self._llm.bind_tools(tools)
-            response = llm_with_tools.invoke([self._build_mcp_system(), *state["messages"]])
+            response = llm_with_tools.invoke(
+                [self._build_mcp_system(), state["messages"][-1]]
+            )
             if response.tool_calls:
                 tool_results = self._execute_tool_calls(response.tool_calls, tools)
-                self._try_generate_chart(tool_results)
+                if state.get("wants_chart"):
+                    self._try_generate_chart(tool_results)
                 return {"mcp_result": tool_results}
             return {"mcp_result": response.content}
         except Exception:
             logger.exception("MCP node failed for query: %s", query[:50])
-            return {"mcp_result": "Error fetching security data. The platform may be unavailable."}
+            return {
+                "mcp_result": "Error fetching security data. The platform may be unavailable."
+            }
 
     def rag_node(self, state: AgentState) -> dict:
         query = cast(str, state["messages"][-1].content)
@@ -117,7 +137,37 @@ class AgentNodes:
             logger.exception("RAG node failed for query: %s", query[:50])
             return {"rag_result": "Error retrieving documentation."}
 
-    _AGGREGATION_KEYWORDS = frozenset(["how many", "how much", "in total", "total", "count", "how much there"])
+    _AGGREGATION_KEYWORDS = frozenset(
+        ["how many", "how much", "in total", "total", "count", "how much there"]
+    )
+    _CHART_KEYWORDS = frozenset(
+        ["chart", "graph", "visualize", "visualization", "plot"]
+    )
+    # If the LLM misclassifies a data+chart query as "chart", these words signal fresh data is needed.
+    _DATA_ENTITY_KEYWORDS = frozenset(
+        [
+            "issues",
+            "issue",
+            "applications",
+            "apps",
+            "pipeline",
+            "findings",
+            "vulnerabilities",
+            "distribution",
+            "breakdown",
+            "critical",
+            "high",
+            "medium",
+            "low",
+            "open",
+            "resolved",
+            "payment-service",
+            "auth-service",
+            "user-service",
+            "api-gateway",
+            "frontend-app",
+        ]
+    )
 
     def format_response(self, state: AgentState) -> dict:
         query = cast(str, state["messages"][-1].content)
@@ -126,18 +176,42 @@ class AgentNodes:
         try:
             # Pure data queries: format deterministically so no items get dropped by LLM summarization.
             # Exception: aggregation queries need the LLM to synthesize a count answer.
-            is_aggregation = any(kw in query.lower() for kw in self._AGGREGATION_KEYWORDS)
+            is_aggregation = any(
+                kw in query.lower() for kw in self._AGGREGATION_KEYWORDS
+            )
+            chart_note = (
+                "Chart generated and displayed in a separate window.\n\n"
+                if state.get("wants_chart")
+                else ""
+            )
             if rag_result == "N/A" and mcp_result != "N/A" and not is_aggregation:
-                return {"final_response": self._format_mcp_as_markdown(mcp_result)}
-            response = self._formatter.invoke({
-                "query": query,
-                "mcp_result": mcp_result,
-                "rag_result": rag_result,
-            })
-            return {"final_response": response.content}
+                return {
+                    "final_response": chart_note
+                    + self._format_mcp_as_markdown(mcp_result)
+                }
+            response = self._formatter.invoke(
+                {
+                    "query": query,
+                    "mcp_result": mcp_result,
+                    "rag_result": rag_result,
+                }
+            )
+            return {"final_response": chart_note + cast(str, response.content)}
         except Exception:
             logger.exception("Formatter failed")
             return {"final_response": "Sorry, I could not generate a response."}
+
+    def chart_node(self, state: AgentState) -> dict:
+        mcp_result = state.get("mcp_result") or ""
+        if not mcp_result or mcp_result == "N/A":
+            return {
+                "final_response": "No data available to chart. Please run a data query first."
+            }
+        self._try_generate_chart(mcp_result)
+        formatted = self._format_mcp_as_markdown(mcp_result)
+        return {
+            "final_response": f"Chart generated from previous results.\n\n{formatted}"
+        }
 
     def _format_mcp_as_markdown(self, mcp_result: str) -> str:
         sections: list[str] = []
@@ -155,7 +229,9 @@ class AgentNodes:
             if not items:
                 sections.append(f"**{tool_name}:** No results found.")
                 continue
-            lines = [f"**{tool_name}** — {len(items)} result{'s' if len(items) != 1 else ''}:\n"]
+            lines = [
+                f"**{tool_name}** — {len(items)} result{'s' if len(items) != 1 else ''}:\n"
+            ]
             for idx, item in enumerate(items, 1):
                 fields = "  \n".join(
                     f"  - **{k.replace('_', ' ').title()}**: {v}"

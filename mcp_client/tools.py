@@ -10,31 +10,81 @@ logger = logging.getLogger(__name__)
 
 
 class _GetIssuesInput(BaseModel):
-    severity: str | None = Field(None, description="Filter by severity: critical, high, medium, low")
-    category: str | None = Field(None, description="Filter by category: injection, xss, broken_auth, exposed_data, misconfig, dependency")
-    status: str | None = Field(None, description="Filter by status: open, in_progress, resolved")
-    application: str | None = Field(None, description="Filter by application/service name (e.g. 'payment-service', 'auth-service', 'user-service')")
-    keyword: str | None = Field(None, description="Case-insensitive substring match on issue title (e.g. 'SQL', 'JWT', 'log4j', 'S3')")
-    cve_id: str | None = Field(None, description="Exact CVE identifier to look up (e.g. 'CVE-2021-44228')")
-    discovered_after: str | None = Field(None, description="Return issues discovered on or after this ISO date (YYYY-MM-DD)")
-    discovered_before: str | None = Field(None, description="Return issues discovered on or before this ISO date (YYYY-MM-DD). Combine with discovered_after for a date range.")
+    severity: str | None = Field(
+        None, description="Filter by severity: critical, high, medium, low"
+    )
+    category: str | None = Field(
+        None,
+        description="Filter by category: injection, xss, broken_auth, exposed_data, misconfig, dependency",
+    )
+    status: str | None = Field(
+        None, description="Filter by status: open, in_progress, resolved"
+    )
+    application: str | None = Field(
+        None,
+        description="Filter by application/service name (e.g. 'payment-service', 'auth-service', 'user-service')",
+    )
+    keyword: str | None = Field(
+        None,
+        description="Case-insensitive substring match on issue title (e.g. 'SQL', 'JWT', 'log4j', 'S3')",
+    )
+    cve_id: str | None = Field(
+        None, description="Exact CVE identifier to look up (e.g. 'CVE-2021-44228')"
+    )
+    discovered_after: str | None = Field(
+        None,
+        description="Return issues discovered on or after this ISO date (YYYY-MM-DD)",
+    )
+    discovered_before: str | None = Field(
+        None,
+        description="Return issues discovered on or before this ISO date (YYYY-MM-DD). Combine with discovered_after for a date range.",
+    )
     limit: int | None = Field(None, description="Maximum number of results to return")
 
 
 class _GetApplicationsInput(BaseModel):
-    min_risk_score: float | None = Field(None, description="Minimum risk score (0-10). Results are always sorted by risk score descending.")
-    limit: int | None = Field(None, description="Maximum number of applications to return (use this for 'top N' queries)")
+    min_risk_score: float | None = Field(
+        None,
+        description="Minimum risk score (0-10). Results are always sorted by risk score descending.",
+    )
+    limit: int | None = Field(
+        None,
+        description="Maximum number of applications to return (use this for 'top N' queries)",
+    )
 
 
 class _GetPipelineIssuesInput(BaseModel):
-    severity: str | None = Field(None, description="Filter by severity: critical, high, medium, low")
-    pipeline: str | None = Field(None, description="Filter by CI/CD pipeline name (e.g. 'auth-service-ci', 'payment-service-ci'). Use '<service>-ci' pattern for a specific service.")
-    stage: str | None = Field(None, description="Filter by pipeline stage (e.g. 'sast', 'dependency-scan', 'secret-scan', 'container-scan', 'dast')")
-    tool: str | None = Field(None, description="Filter by scanner tool name (e.g. 'Trivy', 'Semgrep', 'Gitleaks', 'OWASP ZAP')")
-    branch: str | None = Field(None, description="Filter by git branch; prefix match supported (e.g. 'feature' matches 'feature/login-refactor')")
-    keyword: str | None = Field(None, description="Case-insensitive substring match on finding title (e.g. 'AWS', 'secret', 'log4j', 'JWT')")
-    detected_after: str | None = Field(None, description="Return findings detected on or after this ISO date (YYYY-MM-DD)")
-    detected_before: str | None = Field(None, description="Return findings detected on or before this ISO date (YYYY-MM-DD). Combine with detected_after for a date range.")
+    severity: str | None = Field(
+        None, description="Filter by severity: critical, high, medium, low"
+    )
+    pipeline: str | None = Field(
+        None,
+        description="Filter by CI/CD pipeline name (e.g. 'auth-service-ci', 'payment-service-ci'). Use '<service>-ci' pattern for a specific service.",
+    )
+    stage: str | None = Field(
+        None,
+        description="Filter by pipeline stage (e.g. 'sast', 'dependency-scan', 'secret-scan', 'container-scan', 'dast')",
+    )
+    tool: str | None = Field(
+        None,
+        description="Filter by scanner tool name (e.g. 'Trivy', 'Semgrep', 'Gitleaks', 'OWASP ZAP')",
+    )
+    branch: str | None = Field(
+        None,
+        description="Filter by git branch; prefix match supported (e.g. 'feature' matches 'feature/login-refactor')",
+    )
+    keyword: str | None = Field(
+        None,
+        description="Case-insensitive substring match on finding title (e.g. 'AWS', 'secret', 'log4j', 'JWT')",
+    )
+    detected_after: str | None = Field(
+        None,
+        description="Return findings detected on or after this ISO date (YYYY-MM-DD)",
+    )
+    detected_before: str | None = Field(
+        None,
+        description="Return findings detected on or before this ISO date (YYYY-MM-DD). Combine with detected_after for a date range.",
+    )
     limit: int | None = Field(None, description="Maximum number of results to return")
 
 

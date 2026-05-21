@@ -23,7 +23,10 @@ def main() -> None:
     print("Type 'exit' to quit.\n")
 
     app = AgentFactory.build()
-    config: RunnableConfig = {"configurable": {"thread_id": "session-1"}, "recursion_limit": 15}
+    config: RunnableConfig = {
+        "configurable": {"thread_id": "session-1"},
+        "recursion_limit": 15,
+    }
 
     while True:
         try:
@@ -45,7 +48,9 @@ def main() -> None:
             )
             response = result.get("final_response", "No response generated.")
             print(f"\nAgent: {response}\n")
-        except Exception:  # broad catch intentional: CLI loop must not crash on any agent error
+        except (
+            Exception
+        ):  # broad catch intentional: CLI loop must not crash on any agent error
             logger.exception("Agent invocation failed")
             print("Agent: Something went wrong. Is the mock server running?\n")
 

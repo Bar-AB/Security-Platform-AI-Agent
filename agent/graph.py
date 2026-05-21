@@ -30,13 +30,14 @@ class GraphBuilder:
         graph.add_node("classify_query", self._nodes.classify_query)
         graph.add_node("mcp_node", self._nodes.mcp_node)
         graph.add_node("rag_node", self._nodes.rag_node)
+        graph.add_node("chart_node", self._nodes.chart_node)
         graph.add_node("format_response", self._nodes.format_response)
 
         graph.add_edge(START, "classify_query")
-        # mixed queries fan out to both nodes in parallel; each writes to its own state key
         graph.add_conditional_edges("classify_query", self._route_after_classify)
         graph.add_edge("mcp_node", "format_response")
         graph.add_edge("rag_node", "format_response")
+        graph.add_edge("chart_node", END)
         graph.add_edge("format_response", END)
 
         checkpointer = MemorySaver() if with_memory else None
@@ -44,6 +45,8 @@ class GraphBuilder:
 
     def _route_after_classify(self, state: AgentState) -> str | list[str]:
         qtype = state["query_type"]
+        if qtype == "chart":
+            return "chart_node"
         if qtype == "data":
             return "mcp_node"
         if qtype == "doc":
