@@ -35,7 +35,17 @@ class TestSecurityMCPTools:
         result = tools_obj.get_security_issues(severity="critical")
         mock_client.call_tool_sync.assert_called_once_with(
             "get_security_issues",
-            {"severity": "critical", "category": None, "status": None},
+            {
+                "severity": "critical",
+                "category": None,
+                "status": None,
+                "application": None,
+                "keyword": None,
+                "cve_id": None,
+                "discovered_after": None,
+                "discovered_before": None,
+                "limit": None,
+            },
         )
         assert "SQL Injection" in result
 

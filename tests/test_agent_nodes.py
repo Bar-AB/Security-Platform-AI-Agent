@@ -101,7 +101,7 @@ class TestClassifyQuery:
         from agent.nodes import AgentNodes
 
         classification = QueryClassification(
-            query_type="data", reasoning="asks for issue data"
+            query_type="data", reasoning="asks for issue data", docs_query=""
         )
         mock_llm.with_structured_output.return_value.invoke.return_value = (
             classification
@@ -123,7 +123,7 @@ class TestClassifyQuery:
         from agent.nodes import AgentNodes
 
         classification = QueryClassification(
-            query_type="doc", reasoning="asks about docs"
+            query_type="doc", reasoning="asks about docs", docs_query=""
         )
         mock_llm.with_structured_output.return_value.invoke.return_value = (
             classification
@@ -495,12 +495,4 @@ class TestGraphRouting:
             "rag_result": "",
             "final_response": "",
         }
-        state_after_mcp: AgentState = {
-            "messages": [],
-            "query_type": "mixed",
-            "mcp_result": "some data",
-            "rag_result": "",
-            "final_response": "",
-        }
-        assert builder._route_after_classify(state_mixed) == "mcp_node"
-        assert builder._route_after_mcp(state_after_mcp) == "rag_node"
+        assert builder._route_after_classify(state_mixed) == ["mcp_node", "rag_node"]

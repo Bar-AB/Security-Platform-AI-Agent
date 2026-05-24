@@ -1,3 +1,4 @@
+import hashlib
 import logging
 from pathlib import Path
 
@@ -23,16 +24,27 @@ class RAGIndexer:
     def build_index(self) -> None:
         docs = self._load_documents()
         chunks = self._split_documents(docs)
-        self._store_chunks(chunks)
+        docs_hash = self._compute_docs_hash()
+        self._store_chunks(chunks, docs_hash)
         logger.info("Indexed %d chunks from %s", len(chunks), self._docs_dir)
 
     def is_indexed(self) -> bool:
         try:
             col = self._client.get_collection(_COLLECTION_NAME)
-            return col.count() > 0
+            if col.count() == 0:
+                return False
+            stored_hash = (col.metadata or {}).get("docs_hash")
+            return stored_hash == self._compute_docs_hash()
         except Exception:
             logger.debug("Collection not found or not indexed", exc_info=True)
             return False
+
+    def _compute_docs_hash(self) -> str:
+        h = hashlib.md5()
+        for path in sorted(self._docs_dir.glob("*.md")):
+            h.update(path.name.encode())
+            h.update(path.read_bytes())
+        return h.hexdigest()
 
     def _load_documents(self) -> list[Document]:
         docs: list[Document] = []
@@ -57,16 +69,19 @@ class RAGIndexer:
             chunks.extend(splits)
         return chunks
 
-    def _store_chunks(self, chunks: list[Document]) -> None:
+    def _store_chunks(self, chunks: list[Document], docs_hash: str) -> None:
         try:
             self._client.delete_collection(_COLLECTION_NAME)
         except Exception:
             pass
-        collection = self._client.create_collection(_COLLECTION_NAME)
+        collection = self._client.create_collection(
+            _COLLECTION_NAME,
+            metadata={"docs_hash": docs_hash},
+        )
         texts = [c.page_content for c in chunks]
         metadatas = [c.metadata for c in chunks]
         embeddings = self._embeddings.embed_documents(texts)
         ids = [f"chunk_{i}" for i in range(len(chunks))]
         collection.add(
-            documents=texts, embeddings=embeddings, metadatas=metadatas, ids=ids
-        )  # type: ignore[arg-type]
+            documents=texts, embeddings=embeddings, metadatas=metadatas, ids=ids  # type: ignore[arg-type]
+        )
