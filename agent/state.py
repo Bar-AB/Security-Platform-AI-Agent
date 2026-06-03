@@ -10,12 +10,14 @@ class QueryClassification(BaseModel):
     query_type: Literal["data", "doc", "mixed", "chart"]
     reasoning: str
     docs_query: str
+    standalone_query: str
 
 
 class AgentState(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
     query_type: str
     docs_query: str
+    standalone_query: NotRequired[str]
     mcp_result: str
     rag_result: str
     final_response: str

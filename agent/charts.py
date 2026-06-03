@@ -1,5 +1,7 @@
 import logging
+import os
 import subprocess
+import sys
 
 import matplotlib
 
@@ -43,8 +45,19 @@ class SecurityCharts:
     def _save_fig(self, fig: plt.Figure, filename: str) -> str:
         fig.savefig(filename, dpi=100, bbox_inches="tight")
         plt.close(fig)
-        try:
-            subprocess.run(["open", filename], check=False)
-        except FileNotFoundError:
-            pass
+        self._open_file(filename)
         return filename
+
+    @staticmethod
+    def _open_file(filename: str) -> None:
+        # Open in the OS default image viewer. macOS uses `open`, Linux `xdg-open`,
+        # Windows `os.startfile`. Best-effort: a headless environment just keeps the PNG.
+        try:
+            if sys.platform == "win32":
+                os.startfile(filename)  # type: ignore[attr-defined]  # Windows-only API
+            elif sys.platform == "darwin":
+                subprocess.run(["open", filename], check=False)
+            else:
+                subprocess.run(["xdg-open", filename], check=False)
+        except (OSError, FileNotFoundError):
+            logger.debug("Could not open chart file %s", filename, exc_info=True)

@@ -4,7 +4,7 @@ from datetime import date
 from typing import cast
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
 from agent.charts import SecurityCharts
 from agent.prompts import CLASSIFIER_PROMPT, FORMATTER_PROMPT
@@ -29,11 +29,13 @@ class AgentNodes:
         self._charts = SecurityCharts()
 
     def classify_query(self, state: AgentState) -> dict:
-        query = cast(str, state["messages"][-1].content)
+        messages = state["messages"]
+        query = cast(str, messages[-1].content)
+        history = self._format_history(messages)
         wants_chart = any(kw in query.lower() for kw in self._CHART_KEYWORDS)
         try:
             classifier = self._llm.with_structured_output(QueryClassification)
-            prompt_value = CLASSIFIER_PROMPT.invoke({"query": query})
+            prompt_value = CLASSIFIER_PROMPT.invoke({"history": history, "query": query})
             result = cast(QueryClassification, classifier.invoke(prompt_value))
             query_type = result.query_type
             if query_type == "chart" and any(
@@ -41,10 +43,17 @@ class AgentNodes:
             ):
                 query_type = "data"
                 logger.info("Overriding 'chart' → 'data': query contains data entities")
-            logger.info("Classified '%s' as '%s'", query[:50], query_type)
+            standalone = result.standalone_query or query
+            logger.info(
+                "Classified '%s' as '%s' (standalone: '%s')",
+                query[:50],
+                query_type,
+                standalone[:60],
+            )
             return {
                 "query_type": query_type,
                 "docs_query": result.docs_query,
+                "standalone_query": standalone,
                 "wants_chart": wants_chart,
             }
         except Exception:
@@ -52,8 +61,27 @@ class AgentNodes:
             return {
                 "query_type": "mixed",
                 "docs_query": query,
+                "standalone_query": query,
                 "wants_chart": wants_chart,
             }
+
+    @staticmethod
+    def _format_history(messages: list[BaseMessage], max_messages: int = 6) -> str:
+        # MemorySaver persists the full thread; we feed the recent turns (user questions and
+        # assistant answers) to the classifier so it can resolve follow-up references. Each
+        # message is truncated to keep the classifier prompt small.
+        prior = messages[:-1][-max_messages:]
+        lines: list[str] = []
+        for msg in prior:
+            if isinstance(msg, HumanMessage):
+                role = "User"
+            elif isinstance(msg, AIMessage):
+                role = "Assistant"
+            else:
+                continue
+            content = msg.content if isinstance(msg.content, str) else str(msg.content)
+            lines.append(f"{role}: {content[:500]}")
+        return "\n".join(lines) if lines else "(no prior conversation)"
 
     @staticmethod
     def _build_mcp_system() -> SystemMessage:
@@ -106,12 +134,14 @@ class AgentNodes:
         )
 
     def mcp_node(self, state: AgentState) -> dict:
-        query = cast(str, state["messages"][-1].content)
+        query = state.get("standalone_query") or cast(
+            str, state["messages"][-1].content
+        )
         tools = self._mcp_tools.as_langchain_tools()
         try:
             llm_with_tools = self._llm.bind_tools(tools)
             response = llm_with_tools.invoke(
-                [self._build_mcp_system(), state["messages"][-1]]
+                [self._build_mcp_system(), HumanMessage(query)]
             )
             if response.tool_calls:
                 tool_results = self._execute_tool_calls(response.tool_calls, tools)
@@ -170,7 +200,9 @@ class AgentNodes:
     )
 
     def format_response(self, state: AgentState) -> dict:
-        query = cast(str, state["messages"][-1].content)
+        query = state.get("standalone_query") or cast(
+            str, state["messages"][-1].content
+        )
         mcp_result = state.get("mcp_result") or "N/A"
         rag_result = state.get("rag_result") or "N/A"
         try:
@@ -180,15 +212,14 @@ class AgentNodes:
                 kw in query.lower() for kw in self._AGGREGATION_KEYWORDS
             )
             chart_note = (
-                "Chart generated and displayed in a separate window.\n\n"
+                "Chart generated and opened in your default image viewer.\n\n"
                 if state.get("wants_chart")
                 else ""
             )
             if rag_result == "N/A" and mcp_result != "N/A" and not is_aggregation:
-                return {
-                    "final_response": chart_note
-                    + self._format_mcp_as_markdown(mcp_result)
-                }
+                return self._emit(
+                    chart_note + self._format_mcp_as_markdown(mcp_result)
+                )
             response = self._formatter.invoke(
                 {
                     "query": query,
@@ -196,22 +227,47 @@ class AgentNodes:
                     "rag_result": rag_result,
                 }
             )
-            return {"final_response": chart_note + cast(str, response.content)}
+            sources_footer = self._build_sources_footer(rag_result)
+            return self._emit(
+                chart_note + cast(str, response.content) + sources_footer
+            )
         except Exception:
             logger.exception("Formatter failed")
-            return {"final_response": "Sorry, I could not generate a response."}
+            return self._emit("Sorry, I could not generate a response.")
+
+    @staticmethod
+    def _emit(text: str) -> dict:
+        # Write the final answer AND append it to the message history as an AIMessage so the next
+        # turn's classifier can use it for follow-up resolution (MemorySaver persists the thread).
+        return {"final_response": text, "messages": [AIMessage(content=text)]}
 
     def chart_node(self, state: AgentState) -> dict:
         mcp_result = state.get("mcp_result") or ""
         if not mcp_result or mcp_result == "N/A":
-            return {
-                "final_response": "No data available to chart. Please run a data query first."
-            }
+            return self._emit(
+                "No data available to chart. Please run a data query first."
+            )
         self._try_generate_chart(mcp_result)
         formatted = self._format_mcp_as_markdown(mcp_result)
-        return {
-            "final_response": f"Chart generated from previous results.\n\n{formatted}"
-        }
+        return self._emit(f"Chart generated from previous results.\n\n{formatted}")
+
+    @staticmethod
+    def _build_sources_footer(rag_result: str) -> str:
+        # Guarantees source attribution is always visible: the retriever prefixes each chunk
+        # with a "[source.md — section]" citation, but the LLM formatter doesn't reliably echo
+        # them. We extract those citations and append a deterministic Sources line.
+        if rag_result == "N/A":
+            return ""
+        sources: list[str] = []
+        for part in rag_result.split("\n\n---\n\n"):
+            first_line = part.strip().split("\n", 1)[0].strip()
+            if not (first_line.startswith("[") and first_line.endswith("]")):
+                continue
+            if first_line not in sources:
+                sources.append(first_line)
+        if not sources:
+            return ""
+        return "\n\n**Sources:** " + ", ".join(sources)
 
     def _format_mcp_as_markdown(self, mcp_result: str) -> str:
         sections: list[str] = []

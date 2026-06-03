@@ -6,7 +6,14 @@ CLASSIFIER_PROMPT = ChatPromptTemplate.from_messages(
             "system",
             """You are a query classifier for a security platform assistant.
 
-Classify the user's query into exactly one type:
+You are given the recent CONVERSATION HISTORY and the user's LATEST MESSAGE. Use the history to
+resolve any references in the latest message — pronouns ("it", "that"), ellipsis, and follow-ups
+like "what are the steps?", "tell me more", "and the high ones?" that only make sense in context.
+
+CONVERSATION HISTORY:
+{history}
+
+Classify the LATEST MESSAGE (interpreted in context) into exactly one type:
 - "data": User wants live security data (issues, applications, pipeline findings, counts, severities).
 - "doc": User wants to know HOW to use the platform (setup, connectors, dashboard, filters).
 - "mixed": User wants BOTH data AND documentation (e.g. explain a vulnerability category AND show examples).
@@ -16,21 +23,33 @@ Classify the user's query into exactly one type:
   "plot that", "visualize the results". If the query asks to retrieve, filter, or analyze ANY data —
   even while also requesting a chart — use "data" or "mixed" instead, never "chart".
 
-Also produce a docs_query: a refined search string for the documentation knowledge base.
-- "data" queries: set docs_query to the original query (it will not be used).
+Produce a standalone_query: the LATEST MESSAGE rewritten as a complete, self-contained question that
+makes sense WITHOUT the history. Resolve every reference using the history. If the latest message is
+already self-contained, return it unchanged.
+- "What are the steps?" (after discussing the GitHub connector) → "What are the steps to connect the GitHub connector?"
+- "and the high ones?" (after showing critical issues) → "Show me the high severity issues"
+
+Also produce a docs_query: a refined, CONTEXT-RESOLVED keyword search string for the documentation
+knowledge base.
+- "data" queries: set docs_query to the standalone_query (it will not be used).
 - "doc" queries: rewrite as a concise keyword search focused on setup, configuration, or how-to aspects.
 - "mixed" queries: extract only the conceptual/documentation part; strip data-specific language.
-- "chart" queries: set docs_query to the original query (it will not be used).
+- "chart" queries: set docs_query to the standalone_query (it will not be used).
 
-Examples:
-- "Show me critical issues" → type: data, docs_query: "Show me critical issues"
+Examples (no relevant history → standalone_query equals the message):
+- "Show me critical issues" → type: data, standalone_query: "Show me critical issues", docs_query: "Show me critical issues"
 - "Show me the severity distribution of all issues as a chart" → type: data (has data entities: issues, severity)
 - "Show me open injection issues as a graph" → type: data (has data entities: issues, injection)
 - "How do I connect Jira?" → type: doc, docs_query: "Jira connector setup configuration"
 - "What is SQL injection and how many do we have?" → type: mixed, docs_query: "SQL injection vulnerability explanation"
 - "Show me on the chart" → type: chart (no data entities, refers to prior results)
 - "Plot that" → type: chart (no data entities, refers to prior results)
-- "Can I see the graph?" → type: chart, docs_query: "Can I see the graph\"""",
+
+Example WITH history:
+  History: "User: How do I connect to GitHub?\\nAssistant: [explains the GitHub connector]"
+  Latest: "What are the steps?"
+  → type: doc, standalone_query: "What are the steps to connect the GitHub connector?",
+    docs_query: "GitHub connector setup steps install" """,
         ),
         ("human", "{query}"),
     ]

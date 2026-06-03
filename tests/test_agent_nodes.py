@@ -8,7 +8,10 @@ class TestAgentStateAndClassification:
         from agent.state import QueryClassification
 
         qc = QueryClassification(
-            query_type="chart", reasoning="follow-up", docs_query=""
+            query_type="chart",
+            reasoning="follow-up",
+            docs_query="",
+            standalone_query="show me the chart of the previous results",
         )
         assert qc.query_type == "chart"
 
@@ -36,7 +39,10 @@ class TestClassifyQueryChartDetection:
 
         llm = MagicMock()
         classification = QueryClassification(
-            query_type="data", reasoning="data query", docs_query=""
+            query_type="data",
+            reasoning="data query",
+            docs_query="",
+            standalone_query="show me critical issues",
         )
         llm.with_structured_output.return_value.invoke.return_value = classification
         return AgentNodes(llm=llm, mcp_tools=MagicMock(), retriever=MagicMock())
@@ -101,7 +107,10 @@ class TestClassifyQuery:
         from agent.nodes import AgentNodes
 
         classification = QueryClassification(
-            query_type="data", reasoning="asks for issue data", docs_query=""
+            query_type="data",
+            reasoning="asks for issue data",
+            docs_query="",
+            standalone_query="show me critical issues",
         )
         mock_llm.with_structured_output.return_value.invoke.return_value = (
             classification
@@ -117,13 +126,17 @@ class TestClassifyQuery:
         }
         result = nodes.classify_query(state)
         assert result["query_type"] == "data"
+        assert result["standalone_query"] == "show me critical issues"
 
     def test_classify_doc_query(self, mock_llm):
         from agent.state import AgentState, QueryClassification
         from agent.nodes import AgentNodes
 
         classification = QueryClassification(
-            query_type="doc", reasoning="asks about docs", docs_query=""
+            query_type="doc",
+            reasoning="asks about docs",
+            docs_query="Jira connector setup",
+            standalone_query="how do I connect Jira?",
         )
         mock_llm.with_structured_output.return_value.invoke.return_value = (
             classification
@@ -139,6 +152,48 @@ class TestClassifyQuery:
         }
         result = nodes.classify_query(state)
         assert result["query_type"] == "doc"
+        assert result["standalone_query"] == "how do I connect Jira?"
+
+
+class TestFormatHistory:
+    @pytest.fixture
+    def nodes(self):
+        from agent.nodes import AgentNodes
+
+        return AgentNodes(llm=MagicMock(), mcp_tools=MagicMock(), retriever=MagicMock())
+
+    def test_no_prior_messages_returns_placeholder(self, nodes):
+        from langchain_core.messages import HumanMessage
+
+        history = nodes._format_history([HumanMessage("only the current message")])
+        assert history == "(no prior conversation)"
+
+    def test_includes_prior_user_and_assistant_turns(self, nodes):
+        from langchain_core.messages import AIMessage, HumanMessage
+
+        messages = [
+            HumanMessage("How do I connect to GitHub?"),
+            AIMessage("Use the GitHub connector under Settings."),
+            HumanMessage("What are the steps?"),  # current turn, excluded
+        ]
+        history = nodes._format_history(messages)
+        assert "User: How do I connect to GitHub?" in history
+        assert "Assistant: Use the GitHub connector under Settings." in history
+        # the current (last) message must not be part of the history
+        assert "What are the steps?" not in history
+
+    def test_truncates_long_message_content(self, nodes):
+        from langchain_core.messages import AIMessage, HumanMessage
+
+        long_answer = "x" * 1000
+        messages = [
+            HumanMessage("question"),
+            AIMessage(long_answer),
+            HumanMessage("follow up"),
+        ]
+        history = nodes._format_history(messages)
+        assert "x" * 500 in history
+        assert "x" * 501 not in history
 
 
 class TestMCPNode:

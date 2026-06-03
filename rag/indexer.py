@@ -76,7 +76,9 @@ class RAGIndexer:
             pass
         collection = self._client.create_collection(
             _COLLECTION_NAME,
-            metadata={"docs_hash": docs_hash},
+            # hnsw:space=cosine — magnitude-invariant, the right metric for text embeddings.
+            # Without this ChromaDB defaults to L2.
+            metadata={"docs_hash": docs_hash, "hnsw:space": "cosine"},
         )
         texts = [c.page_content for c in chunks]
         metadatas = [c.metadata for c in chunks]
