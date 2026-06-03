@@ -25,7 +25,7 @@ LangGraph Agent
                                     →  chart auto-generated + opened (matplotlib)
 ```
 
-**Conversation memory** is persisted per session via LangGraph's `MemorySaver`.
+**Conversation memory** is persisted per session via LangGraph's `MemorySaver`, with follow-up resolution: the classifier uses recent history to rewrite context-dependent questions (e.g. "what are the steps?") into self-contained queries before routing.
 
 ---
 
@@ -36,6 +36,7 @@ LangGraph Agent
 - **Deterministic rendering** — data results are rendered directly as markdown so the LLM can't drop rows; LLM formatter is used only for aggregation queries ("how many…", "total…")
 - **Chart generation** — severity distribution and top vulnerable apps charts auto-open in Preview after any data query
 - **RAG over docs** — semantic search over `docs/connectors.md` and `docs/dashboard.md` with source attribution
+- **Multi-turn follow-ups** — per-session memory plus query contextualization, so "what are the steps?" resolves against the previous turn
 - **Mock security platform** — realistic CVE-style data served via FastMCP (no external credentials needed)
 
 ---
@@ -102,6 +103,15 @@ Show me Semgrep findings from the auth pipeline
 How many issues were discovered in November 2024?
 What are the SAST findings on the main branch?
 How do I connect Jira to the platform?
+```
+
+Follow-up questions work within a conversation — the agent resolves them against prior turns:
+
+```
+> How do I connect the GitHub connector?
+  ...(answers with the setup steps)
+> What are the steps?
+  ...(knows you still mean the GitHub connector)
 ```
 
 ---
