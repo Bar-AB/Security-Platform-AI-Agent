@@ -55,6 +55,7 @@ class AgentNodes:
                 "docs_query": result.docs_query,
                 "standalone_query": standalone,
                 "wants_chart": wants_chart,
+                **self._fresh_results(query_type),
             }
         except Exception:
             logger.exception("Classification failed, defaulting to 'mixed'")
@@ -63,13 +64,22 @@ class AgentNodes:
                 "docs_query": query,
                 "standalone_query": query,
                 "wants_chart": wants_chart,
+                **self._fresh_results("mixed"),
             }
 
     @staticmethod
+    def _fresh_results(query_type: str) -> dict:
+        # Wipe per-turn outputs so a node that doesn't run this turn can't leak last turn's
+        # result (state is persisted per thread). The "chart" route is exempt: it reuses the
+        # previous turn's mcp_result ("now chart that").
+        if query_type == "chart":
+            return {"rag_result": "N/A"}
+        return {"mcp_result": "N/A", "rag_result": "N/A"}
+
+    @staticmethod
     def _format_history(messages: list[BaseMessage], max_messages: int = 6) -> str:
-        # MemorySaver persists the full thread; we feed the recent turns (user questions and
-        # assistant answers) to the classifier so it can resolve follow-up references. Each
-        # message is truncated to keep the classifier prompt small.
+        # Recent turns feed the classifier so it can resolve follow-up references; truncated to
+        # keep the prompt small.
         prior = messages[:-1][-max_messages:]
         lines: list[str] = []
         for msg in prior:
@@ -206,8 +216,8 @@ class AgentNodes:
         mcp_result = state.get("mcp_result") or "N/A"
         rag_result = state.get("rag_result") or "N/A"
         try:
-            # Pure data queries: format deterministically so no items get dropped by LLM summarization.
-            # Exception: aggregation queries need the LLM to synthesize a count answer.
+            # Render pure data deterministically so no rows get dropped; aggregation queries
+            # still go through the LLM to synthesize a count.
             is_aggregation = any(
                 kw in query.lower() for kw in self._AGGREGATION_KEYWORDS
             )
@@ -237,8 +247,7 @@ class AgentNodes:
 
     @staticmethod
     def _emit(text: str) -> dict:
-        # Write the final answer AND append it to the message history as an AIMessage so the next
-        # turn's classifier can use it for follow-up resolution (MemorySaver persists the thread).
+        # Append the answer as an AIMessage so the next turn's classifier sees it for follow-ups.
         return {"final_response": text, "messages": [AIMessage(content=text)]}
 
     def chart_node(self, state: AgentState) -> dict:
@@ -253,9 +262,8 @@ class AgentNodes:
 
     @staticmethod
     def _build_sources_footer(rag_result: str) -> str:
-        # Guarantees source attribution is always visible: the retriever prefixes each chunk
-        # with a "[source.md — section]" citation, but the LLM formatter doesn't reliably echo
-        # them. We extract those citations and append a deterministic Sources line.
+        # The LLM formatter doesn't reliably echo the retriever's "[source — section]" prefixes,
+        # so extract them and append a deterministic Sources line.
         if rag_result == "N/A":
             return ""
         sources: list[str] = []

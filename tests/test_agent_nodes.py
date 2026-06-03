@@ -154,6 +154,61 @@ class TestClassifyQuery:
         assert result["query_type"] == "doc"
         assert result["standalone_query"] == "how do I connect Jira?"
 
+    def test_data_query_resets_stale_rag_result(self, mock_llm):
+        # Regression: a data follow-up after a doc turn must not inherit the prior rag_result.
+        from agent.state import AgentState, QueryClassification
+        from agent.nodes import AgentNodes
+
+        classification = QueryClassification(
+            query_type="data",
+            reasoning="asks for issue data",
+            docs_query="",
+            standalone_query="show me the high severity issues",
+        )
+        mock_llm.with_structured_output.return_value.invoke.return_value = (
+            classification
+        )
+
+        nodes = AgentNodes(llm=mock_llm, mcp_tools=MagicMock(), retriever=MagicMock())
+        state: AgentState = {
+            "messages": [HumanMessage("now show me the high severity issues")],
+            "query_type": "doc",
+            "mcp_result": "N/A",
+            "rag_result": "[connectors.md — GitHub Connector]\nstale doc text",
+            "final_response": "",
+        }
+        result = nodes.classify_query(state)
+        assert result["rag_result"] == "N/A"
+        assert result["mcp_result"] == "N/A"
+
+    def test_chart_query_preserves_prior_mcp_result(self, mock_llm):
+        # The "chart" route reuses the previous turn's mcp_result, so classify must not clear it.
+        from agent.state import AgentState, QueryClassification
+        from agent.nodes import AgentNodes
+
+        classification = QueryClassification(
+            query_type="chart",
+            reasoning="wants a chart of prior results",
+            docs_query="",
+            standalone_query="chart that",
+        )
+        mock_llm.with_structured_output.return_value.invoke.return_value = (
+            classification
+        )
+
+        nodes = AgentNodes(llm=mock_llm, mcp_tools=MagicMock(), retriever=MagicMock())
+        state: AgentState = {
+            "messages": [HumanMessage("now chart that")],
+            "query_type": "data",
+            "mcp_result": '[get_security_issues]\n[{"id": "ISS-001"}]',
+            "rag_result": "N/A",
+            "final_response": "",
+        }
+        result = nodes.classify_query(state)
+        assert result["query_type"] == "chart"
+        assert "mcp_result" not in result  # untouched → prior turn's data survives
+        assert result["rag_result"] == "N/A"
+
 
 class TestFormatHistory:
     @pytest.fixture

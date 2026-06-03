@@ -50,8 +50,7 @@ class SecurityCharts:
 
     @staticmethod
     def _open_file(filename: str) -> None:
-        # Open in the OS default image viewer. macOS uses `open`, Linux `xdg-open`,
-        # Windows `os.startfile`. Best-effort: a headless environment just keeps the PNG.
+        # Best-effort open in the OS default viewer; a headless environment just keeps the PNG.
         try:
             if sys.platform == "win32":
                 os.startfile(filename)  # type: ignore[attr-defined]  # Windows-only API
