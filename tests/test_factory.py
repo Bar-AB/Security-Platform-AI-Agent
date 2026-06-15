@@ -6,6 +6,10 @@ from agent.factory import AgentFactory
 
 
 class TestAgentFactory:
+    @pytest.fixture(autouse=True)
+    def _set_mcp_token(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("MCP_AUTH_TOKEN", "mock-token")
+
     def test_build_returns_compiled_graph(self):
         with (
             patch.object(_factory_module, "RAGIndexer") as mock_idx,

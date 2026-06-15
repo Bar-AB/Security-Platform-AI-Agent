@@ -1,6 +1,9 @@
 import logging
 
 from mcp.server.fastmcp import FastMCP
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 from mock_server.data import MOCK_APPLICATIONS, MOCK_ISSUES, MOCK_PIPELINE_ISSUES
 from mock_server.models import Severity
@@ -134,5 +137,23 @@ def get_pipeline_issues(
     return [i.model_dump() for i in issues]
 
 
+class _HealthMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        if request.url.path != "/health":
+            return await call_next(request)
+        data_ok = bool(MOCK_ISSUES) and bool(MOCK_APPLICATIONS) and bool(MOCK_PIPELINE_ISSUES)
+        if not data_ok:
+            return JSONResponse(
+                {"status": "degraded", "reason": "mock data not loaded"}, status_code=503
+            )
+        return JSONResponse({
+            "status": "ok",
+            "issues": len(MOCK_ISSUES),
+            "apps": len(MOCK_APPLICATIONS),
+            "pipeline_issues": len(MOCK_PIPELINE_ISSUES),
+        })
+
+
 # ASGI app for: uvicorn mock_server.main:app --port 8000
 app = _mcp.streamable_http_app()
+app.add_middleware(_HealthMiddleware)

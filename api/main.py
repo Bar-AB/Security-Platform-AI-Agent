@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from langchain_core.messages import HumanMessage
 from pydantic import BaseModel
@@ -43,7 +44,9 @@ app.add_middleware(
 
 
 @app.get("/health")
-def health() -> dict[str, str]:
+def health(request: Request) -> dict:
+    if not hasattr(request.app.state, "agent") or request.app.state.agent is None:
+        return JSONResponse({"status": "degraded", "reason": "agent not initialized"}, status_code=503)
     return {"status": "ok"}
 
 

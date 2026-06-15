@@ -5,6 +5,7 @@ import logging
 import httpx
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +15,11 @@ class MCPClient:
         self._url = url
         self._headers = {"Authorization": f"Bearer {token}"}
 
+    @retry(
+        retry=retry_if_exception_type(httpx.TransportError),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(min=1, max=4),
+    )
     async def _call(self, tool_name: str, arguments: dict) -> list:
         async with streamable_http_client(
             self._url, http_client=httpx.AsyncClient(headers=self._headers)
