@@ -32,13 +32,17 @@ class GraphBuilder:
         graph.add_node("rag_node", self._nodes.rag_node)
         graph.add_node("chart_node", self._nodes.chart_node)
         graph.add_node("format_response", self._nodes.format_response)
+        graph.add_node("validate_response", self._nodes.validate_response)
 
         graph.add_edge(START, "classify_query")
         graph.add_conditional_edges("classify_query", self._route_after_classify)
         graph.add_edge("mcp_node", "format_response")
         graph.add_edge("rag_node", "format_response")
+        # chart_node renders already-fetched data and makes no new factual claims,
+        # so it routes directly to END and intentionally bypasses validate_response.
         graph.add_edge("chart_node", END)
-        graph.add_edge("format_response", END)
+        graph.add_edge("format_response", "validate_response")
+        graph.add_edge("validate_response", END)
 
         checkpointer = MemorySaver() if with_memory else None
         return graph.compile(checkpointer=checkpointer)

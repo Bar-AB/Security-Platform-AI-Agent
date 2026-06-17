@@ -66,8 +66,22 @@ class RAGIndexer:
             splits = splitter.split_text(doc.page_content)
             for chunk in splits:
                 chunk.metadata.update(doc.metadata)
+                chunk.page_content = self._prepend_breadcrumb(chunk)
             chunks.extend(splits)
         return chunks
+
+    @staticmethod
+    def _prepend_breadcrumb(chunk: Document) -> str:
+        # Child chunks (e.g. "### Setup Steps") carry no parent-header text, so their
+        # embeddings lose the "Jira Connector" context unless we add it explicitly.
+        parts = [
+            chunk.metadata[key]
+            for key in ("h1", "h2", "h3")
+            if chunk.metadata.get(key)
+        ]
+        if not parts:
+            return chunk.page_content
+        return " > ".join(parts) + "\n\n" + chunk.page_content
 
     def _store_chunks(self, chunks: list[Document], docs_hash: str) -> None:
         try:

@@ -1,3 +1,4 @@
+import logging
 import pytest
 from unittest.mock import patch, MagicMock
 
@@ -74,3 +75,93 @@ class TestRAGRetriever:
             retriever = RAGRetriever(persist_dir="/tmp/fake")
             results = retriever.retrieve("Jira setup")
             assert results[0].metadata["source"] == "connectors.md"
+
+    def test_retriever_attaches_distance_to_metadata(self, mock_collection):
+        from rag.retriever import RAGRetriever
+
+        with (
+            patch("rag.retriever.OpenAIEmbeddings") as mock_emb,
+            patch("rag.retriever.chromadb.PersistentClient") as mock_client,
+        ):
+            mock_emb.return_value.embed_query.return_value = [0.1] * 10
+            mock_client.return_value.get_collection.return_value = mock_collection
+            retriever = RAGRetriever(persist_dir="/tmp/fake")
+            results = retriever.retrieve("Jira setup")
+            assert "distance" in results[0].metadata
+            assert results[0].metadata["distance"] == 0.12
+
+    def test_retriever_filters_low_confidence_chunks(self, caplog):
+        from rag.retriever import RAGRetriever
+
+        high_distance_collection = MagicMock()
+        high_distance_collection.query.return_value = {
+            "documents": [["Totally unrelated content about cooking recipes."]],
+            "metadatas": [[{"source": "connectors.md"}]],
+            "distances": [[0.85]],  # above threshold — should be filtered
+        }
+        with (
+            patch("rag.retriever.OpenAIEmbeddings") as mock_emb,
+            patch("rag.retriever.chromadb.PersistentClient") as mock_client,
+        ):
+            mock_emb.return_value.embed_query.return_value = [0.1] * 10
+            mock_client.return_value.get_collection.return_value = high_distance_collection
+            retriever = RAGRetriever(persist_dir="/tmp/fake", distance_threshold=0.5)
+            with caplog.at_level(logging.INFO, logger="rag.retriever"):
+                results = retriever.retrieve("Jira connector setup")
+        assert results == []
+        assert "All 1 retrieved chunks exceeded distance threshold" in caplog.text
+
+    def test_retriever_keeps_chunks_within_threshold(self, mock_collection):
+        from rag.retriever import RAGRetriever
+
+        with (
+            patch("rag.retriever.OpenAIEmbeddings") as mock_emb,
+            patch("rag.retriever.chromadb.PersistentClient") as mock_client,
+        ):
+            mock_emb.return_value.embed_query.return_value = [0.1] * 10
+            mock_client.return_value.get_collection.return_value = mock_collection
+            retriever = RAGRetriever(persist_dir="/tmp/fake", distance_threshold=0.5)
+            results = retriever.retrieve("Jira setup")
+            assert len(results) == 1  # distance 0.12 is within threshold
+
+    def test_retriever_keeps_chunk_at_exact_threshold(self):
+        # distance == threshold is NOT filtered (strictly greater-than comparison)
+        at_threshold_collection = MagicMock()
+        at_threshold_collection.query.return_value = {
+            "documents": [["Some content at the boundary."]],
+            "metadatas": [[{"source": "connectors.md"}]],
+            "distances": [[0.5]],  # exactly at threshold — should be kept
+        }
+        from rag.retriever import RAGRetriever
+
+        with (
+            patch("rag.retriever.OpenAIEmbeddings") as mock_emb,
+            patch("rag.retriever.chromadb.PersistentClient") as mock_client,
+        ):
+            mock_emb.return_value.embed_query.return_value = [0.1] * 10
+            mock_client.return_value.get_collection.return_value = at_threshold_collection
+            retriever = RAGRetriever(persist_dir="/tmp/fake", distance_threshold=0.5)
+            results = retriever.retrieve("anything")
+        assert len(results) == 1
+        assert results[0].metadata["distance"] == 0.5
+
+    def test_retriever_passes_chunks_when_distances_absent(self):
+        # Defensive fallback: when Chroma omits distances, chunks default to 0.0 and pass through.
+        from rag.retriever import RAGRetriever
+
+        no_distances_collection = MagicMock()
+        no_distances_collection.query.return_value = {
+            "documents": [["Some content."]],
+            "metadatas": [[{"source": "connectors.md"}]],
+            # "distances" key absent
+        }
+        with (
+            patch("rag.retriever.OpenAIEmbeddings") as mock_emb,
+            patch("rag.retriever.chromadb.PersistentClient") as mock_client,
+        ):
+            mock_emb.return_value.embed_query.return_value = [0.1] * 10
+            mock_client.return_value.get_collection.return_value = no_distances_collection
+            retriever = RAGRetriever(persist_dir="/tmp/fake", distance_threshold=0.5)
+            results = retriever.retrieve("anything")
+        assert len(results) == 1
+        assert results[0].metadata["distance"] == 0.0

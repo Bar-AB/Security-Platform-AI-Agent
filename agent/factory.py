@@ -37,7 +37,8 @@ class AgentFactory:
                 raise
 
         top_k = int(os.getenv("RAG_TOP_K", "5"))
-        retriever = RAGRetriever(persist_dir=chroma_dir, k=top_k)
+        distance_threshold = float(os.getenv("RAG_DISTANCE_THRESHOLD", "0.5"))
+        retriever = RAGRetriever(persist_dir=chroma_dir, k=top_k, distance_threshold=distance_threshold)
         mcp_client = MCPClient(url=mcp_url, token=mcp_token)
         mcp_tools = SecurityMCPTools(client=mcp_client)
         llm = ChatOpenAI(model=model, temperature=0, max_retries=3)

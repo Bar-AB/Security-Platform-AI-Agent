@@ -17,6 +17,10 @@ Classify the LATEST MESSAGE (interpreted in context) into exactly one type:
 - "data": User wants live security data (issues, applications, pipeline findings, counts, severities).
 - "doc": User wants to know HOW to use the platform (setup, connectors, dashboard, filters).
 - "mixed": User wants BOTH data AND documentation (e.g. explain a vulnerability category AND show examples).
+  A question about a CONNECTOR or platform FEATURE by name (Jira, GitHub, AWS, Slack, dashboard) that
+  also asks about "issues", "problems", or "errors" is "mixed": it needs live data (matching security
+  issues) AND documentation (the connector's setup/troubleshooting guide). Example:
+  "Are there Jira connector issues?" → type: mixed (data: issues mentioning Jira; docs: Jira connector troubleshooting).
 - "chart": User wants to visualize ALREADY FETCHED results from a previous turn. No new data fetch needed.
   Use ONLY when the query contains NO data entities (issues, applications, severities, service names, filters)
   and refers to prior results using short references like "show me on the chart", "can I see the graph?",
@@ -70,5 +74,32 @@ Documentation:
 {rag_result}""",
         ),
         ("human", "{query}"),
+    ]
+)
+
+VALIDATOR_PROMPT = ChatPromptTemplate.from_messages(
+    [
+        (
+            "system",
+            """You are a groundedness validator for a security platform assistant.
+
+Your task: determine whether the RESPONSE is fully supported by the CONTEXT the agent had access to.
+
+CONTEXT:
+{context}
+
+Rules:
+- Specific claims must match exactly: CVE IDs, severity levels, app names, counts, dates, scores.
+- If a context section is "N/A", it provides no grounding.
+- General qualitative statements (e.g. "you should patch this") are always grounded.
+- Flag only concrete factual claims that cannot be verified from the context above.
+
+Produce:
+- score: 0.0 to 1.0 (1.0 = every factual claim is in the context, 0.0 = response invents facts)
+- is_grounded: true if score >= 0.7
+- flagged_claims: list of up to 3 specific phrases from the response not found in the context (empty if none)
+- reasoning: one sentence explaining the score""",
+        ),
+        ("human", "RESPONSE:\n{response}"),
     ]
 )

@@ -7,8 +7,8 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
 from agent.charts import SecurityCharts
-from agent.prompts import CLASSIFIER_PROMPT, FORMATTER_PROMPT
-from agent.state import AgentState, QueryClassification
+from agent.prompts import CLASSIFIER_PROMPT, FORMATTER_PROMPT, VALIDATOR_PROMPT
+from agent.state import AgentState, GroundednessResult, QueryClassification
 from mcp_client.tools import SecurityMCPTools
 from rag.retriever import RAGRetriever
 
@@ -177,6 +177,8 @@ class AgentNodes:
             logger.exception("RAG node failed for query: %s", query[:50])
             return {"rag_result": "Error retrieving documentation."}
 
+    _GROUNDEDNESS_THRESHOLD: float = 0.7
+
     _AGGREGATION_KEYWORDS = frozenset(
         ["how many", "how much", "in total", "total", "count", "how much there"]
     )
@@ -209,6 +211,13 @@ class AgentNodes:
         ]
     )
 
+    # rag_node returns these strings when there is nothing useful to pass to the formatter.
+    _EMPTY_RESULTS = frozenset({
+        "N/A",
+        "No relevant documentation found.",
+        "Error retrieving documentation.",
+    })
+
     def format_response(self, state: AgentState) -> dict:
         query = state.get("standalone_query") or cast(
             str, state["messages"][-1].content
@@ -226,6 +235,13 @@ class AgentNodes:
                 if state.get("wants_chart")
                 else ""
             )
+            # No context from either source — don't let the LLM answer from training data.
+            if mcp_result in self._EMPTY_RESULTS and rag_result in self._EMPTY_RESULTS:
+                return self._emit(
+                    "I don't have information about that in the platform's documentation "
+                    "or security data. Try asking about connectors, dashboards, security "
+                    "issues, applications, or pipeline findings."
+                )
             if rag_result == "N/A" and mcp_result != "N/A" and not is_aggregation:
                 return self._emit(
                     chart_note + self._format_mcp_as_markdown(mcp_result)
@@ -330,6 +346,61 @@ class AgentNodes:
         if app_items:
             path = self._charts.top_vulnerable_apps(app_items)
             logger.info("Chart saved to %s", path)
+
+    def validate_response(self, state: AgentState) -> dict:
+        response = state.get("final_response", "")
+        mcp_result = state.get("mcp_result") or "N/A"
+        rag_result = state.get("rag_result") or "N/A"
+
+        # Nothing to validate against — skip
+        if mcp_result == "N/A" and rag_result == "N/A":
+            return {"validation_score": 1.0, "validation_flagged": False}
+
+        # Guard: if format_response emitted nothing, there's nothing to validate
+        if not response:
+            return {"validation_score": 1.0, "validation_flagged": False}
+
+        context = f"MCP Data:\n{mcp_result}\n\nDocumentation:\n{rag_result}"
+        try:
+            validator = self._llm.with_structured_output(GroundednessResult)
+            result = cast(
+                GroundednessResult,
+                validator.invoke(VALIDATOR_PROMPT.invoke({"context": context, "response": response})),
+            )
+            logger.info(
+                "Groundedness score=%.2f is_grounded=%s flagged=%d claim(s) — %s",
+                result.score,
+                result.is_grounded,
+                len(result.flagged_claims),
+                result.reasoning,
+            )
+            # Guard on score directly — don't trust is_grounded alone; an inconsistent
+            # LLM response (e.g. score=0.2, is_grounded=True) should still trigger the warning.
+            is_flagged = not result.is_grounded or result.score < self._GROUNDEDNESS_THRESHOLD
+            if is_flagged:
+                flagged_lines = "\n".join(f"  • {c}" for c in result.flagged_claims)
+                warning = (
+                    f"\n\n---\n> ⚠️ **Validation warning** (confidence: {result.score:.0%}): "
+                    f"some claims could not be verified against the retrieved data."
+                )
+                if result.flagged_claims:
+                    warning += f"\n> Unverified:\n{flagged_lines}"
+                warned_text = response + warning
+                # Replace the AIMessage committed by format_response so conversation history
+                # stays consistent with what the user sees. LangGraph's add_messages reducer
+                # replaces an existing message when the returned message shares its ID.
+                last_msg = state["messages"][-1]
+                updated_msg = AIMessage(content=warned_text, id=last_msg.id)
+                return {
+                    "messages": [updated_msg],
+                    "final_response": warned_text,
+                    "validation_score": result.score,
+                    "validation_flagged": True,
+                }
+            return {"validation_score": result.score, "validation_flagged": False}
+        except Exception:
+            logger.exception("Response validation failed — skipping")
+            return {"validation_score": 1.0, "validation_flagged": False}
 
     def _execute_tool_calls(self, tool_calls: list, tools: list) -> str:
         tool_map = {t.name: t for t in tools}

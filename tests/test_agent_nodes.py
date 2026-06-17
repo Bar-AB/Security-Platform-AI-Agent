@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import MagicMock, patch
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage
 
 
 class TestAgentStateAndClassification:
@@ -377,20 +377,34 @@ class TestFormatResponse:
     def test_format_response_handles_exception(self, nodes):
         from agent.state import AgentState
 
-        nodes._llm.invoke.side_effect = Exception("LLM failure")
-        # Override the formatter chain to fail
+        # Needs both mcp and rag context so neither the no-context guard nor the
+        # deterministic MCP shortcut fires — forces the code path through the LLM formatter.
         nodes._formatter = MagicMock()
         nodes._formatter.invoke.side_effect = Exception("Chain failure")
         state: AgentState = {
             "messages": [HumanMessage("query")],
-            "query_type": "data",
-            "mcp_result": "",
-            "rag_result": "",
+            "query_type": "mixed",
+            "mcp_result": '[get_security_issues]\n[{"id": "ISS-001", "severity": "critical"}]',
+            "rag_result": "some doc context about connectors",
             "final_response": "",
         }
         result = nodes.format_response(state)
         assert "final_response" in result
         assert "Sorry" in result["final_response"]
+
+    def test_format_response_returns_no_info_when_no_context(self, nodes):
+        from agent.state import AgentState
+
+        state: AgentState = {
+            "messages": [HumanMessage("How do I configure a Kubernetes load balancer?")],
+            "query_type": "doc",
+            "mcp_result": "N/A",
+            "rag_result": "No relevant documentation found.",
+            "final_response": "",
+        }
+        result = nodes.format_response(state)
+        assert "final_response" in result
+        assert "don't have information" in result["final_response"]
 
 
 class TestMCPNodeChartGuard:
@@ -510,6 +524,168 @@ class TestChartNode:
         assert "**formatted results**" in result["final_response"]
 
 
+class TestValidateResponse:
+    @pytest.fixture
+    def nodes(self):
+        from agent.nodes import AgentNodes
+
+        return AgentNodes(llm=MagicMock(), mcp_tools=MagicMock(), retriever=MagicMock())
+
+    def _make_state(self, final_response: str, mcp_result: str = "N/A", rag_result: str = "N/A"):
+        from agent.state import AgentState
+
+        # Mirrors real graph state: format_response._emit appends an AIMessage before
+        # validate_response runs, so messages[-1] is always an AIMessage here.
+        return AgentState(
+            {
+                "messages": [HumanMessage("show me issues"), AIMessage(content=final_response)],
+                "query_type": "data",
+                "docs_query": "",
+                "mcp_result": mcp_result,
+                "rag_result": rag_result,
+                "final_response": final_response,
+            }
+        )
+
+    def test_skips_when_both_contexts_na(self, nodes):
+        state = self._make_state("Some response.", mcp_result="N/A", rag_result="N/A")
+        result = nodes.validate_response(state)
+        assert result["validation_score"] == 1.0
+        assert result["validation_flagged"] is False
+        nodes._llm.with_structured_output.assert_not_called()
+
+    def test_grounded_response_passes_without_modification(self, nodes):
+        from agent.state import GroundednessResult
+
+        grounded = GroundednessResult(
+            score=0.95, is_grounded=True, flagged_claims=[], reasoning="All claims verified."
+        )
+        nodes._llm.with_structured_output.return_value.invoke.return_value = grounded
+        state = self._make_state(
+            final_response="There is 1 critical issue: CVE-2021-44228.",
+            mcp_result='[get_security_issues]\n[{"id":"ISS-001","cve":"CVE-2021-44228","severity":"critical"}]',
+        )
+        result = nodes.validate_response(state)
+        assert result["validation_score"] == 0.95
+        assert result["validation_flagged"] is False
+        assert "final_response" not in result  # response unchanged
+
+    def test_ungrounded_response_appends_warning(self, nodes):
+        from agent.state import GroundednessResult
+
+        ungrounded = GroundednessResult(
+            score=0.4,
+            is_grounded=False,
+            flagged_claims=["CVE-2099-99999 was mentioned but not in data"],
+            reasoning="Response contains a CVE not present in the context.",
+        )
+        nodes._llm.with_structured_output.return_value.invoke.return_value = ungrounded
+        state = self._make_state(
+            final_response="The critical issue CVE-2099-99999 needs patching.",
+            mcp_result='[get_security_issues]\n[{"id":"ISS-001","severity":"low"}]',
+        )
+        result = nodes.validate_response(state)
+        assert result["validation_flagged"] is True
+        assert result["validation_score"] == 0.4
+        assert "⚠️" in result["final_response"]
+        assert "40%" in result["final_response"]
+        assert "CVE-2099-99999 was mentioned but not in data" in result["final_response"]
+        assert result["final_response"].startswith("The critical issue")
+
+    def test_validation_exception_falls_back_to_pass(self, nodes):
+        nodes._llm.with_structured_output.return_value.invoke.side_effect = Exception("LLM error")
+        state = self._make_state(
+            final_response="Some answer.",
+            mcp_result='[get_security_issues]\n[]',
+        )
+        result = nodes.validate_response(state)
+        assert result["validation_score"] == 1.0
+        assert result["validation_flagged"] is False
+
+    def test_warning_fires_when_score_low_despite_is_grounded_true(self, nodes):
+        # Inconsistent LLM output: score says hallucinated, is_grounded says fine.
+        # The code must trust score, not is_grounded, to catch this.
+        from agent.state import GroundednessResult
+
+        inconsistent = GroundednessResult(
+            score=0.2,
+            is_grounded=True,
+            flagged_claims=["invented claim not in context"],
+            reasoning="LLM forgot to set is_grounded=False",
+        )
+        nodes._llm.with_structured_output.return_value.invoke.return_value = inconsistent
+        state = self._make_state(
+            final_response="The issue count is 999.",
+            mcp_result='[get_security_issues]\n[]',
+        )
+        result = nodes.validate_response(state)
+        assert result["validation_flagged"] is True
+        assert "⚠️" in result["final_response"]
+        assert result["validation_score"] == 0.2
+
+    def test_flagged_response_updates_messages_history(self, nodes):
+        # When validation flags a response, the AIMessage in messages must be updated
+        # so conversation history stays consistent with what the user sees.
+        from agent.state import GroundednessResult
+
+        ungrounded = GroundednessResult(
+            score=0.3, is_grounded=False, flagged_claims=["fake CVE"], reasoning="not in data"
+        )
+        nodes._llm.with_structured_output.return_value.invoke.return_value = ungrounded
+        state = self._make_state(
+            final_response="CVE-9999-9999 is critical.",
+            mcp_result='[get_security_issues]\n[]',
+        )
+        original_msg_id = state["messages"][-1].id
+        result = nodes.validate_response(state)
+        # messages must be present and carry the warned text
+        assert "messages" in result
+        updated_msgs = result["messages"]
+        assert len(updated_msgs) == 1
+        assert isinstance(updated_msgs[0], AIMessage)
+        assert "⚠️" in updated_msgs[0].content
+        # ID must match so LangGraph's add_messages reducer replaces, not appends
+        assert updated_msgs[0].id == original_msg_id
+
+    def test_skips_when_final_response_empty(self, nodes):
+        # If format_response emitted an empty string, validation should no-op rather than
+        # validating empty content against real context.
+        state = self._make_state(
+            final_response="",
+            mcp_result='[get_security_issues]\n[{"id":"ISS-001","severity":"critical"}]',
+        )
+        # Overwrite the last AIMessage content to empty to match the state
+        state["messages"][-1] = AIMessage(content="")
+        result = nodes.validate_response(state)
+        assert result["validation_score"] == 1.0
+        assert result["validation_flagged"] is False
+        nodes._llm.with_structured_output.assert_not_called()
+
+
+class TestGroundednessResultValidation:
+    def test_score_above_one_raises_validation_error(self):
+        import pydantic
+        from agent.state import GroundednessResult
+
+        with pytest.raises(pydantic.ValidationError):
+            GroundednessResult(score=1.5, is_grounded=True, flagged_claims=[], reasoning="")
+
+    def test_score_below_zero_raises_validation_error(self):
+        import pydantic
+        from agent.state import GroundednessResult
+
+        with pytest.raises(pydantic.ValidationError):
+            GroundednessResult(score=-0.1, is_grounded=False, flagged_claims=[], reasoning="")
+
+    def test_score_at_boundary_values_accepted(self):
+        from agent.state import GroundednessResult
+
+        low = GroundednessResult(score=0.0, is_grounded=False, flagged_claims=[], reasoning="r")
+        high = GroundednessResult(score=1.0, is_grounded=True, flagged_claims=[], reasoning="r")
+        assert low.score == 0.0
+        assert high.score == 1.0
+
+
 class TestGraphRouting:
     def test_graph_compiles(self):
         from agent.graph import GraphBuilder
@@ -577,7 +753,7 @@ class TestGraphRouting:
         }
         assert builder._route_after_classify(state) == "chart_node"
 
-    def test_graph_compiles_with_chart_node(self):
+    def test_graph_compiles_with_chart_and_validate_nodes(self):
         from agent.graph import GraphBuilder
 
         builder = GraphBuilder(
@@ -587,7 +763,66 @@ class TestGraphRouting:
         )
         app = builder.build(with_memory=False)
         assert app is not None
-        assert "chart_node" in app.get_graph().nodes
+        nodes_in_graph = app.get_graph().nodes
+        assert "chart_node" in nodes_in_graph
+        assert "validate_response" in nodes_in_graph
+
+    def test_chart_path_bypasses_validate_response(self):
+        # Invoke the chart path end-to-end and confirm validate_response is never called.
+        from agent.graph import GraphBuilder
+        from agent.state import AgentState
+        from langchain_core.messages import AIMessage, HumanMessage
+
+        builder = GraphBuilder(llm=MagicMock(), mcp_tools=MagicMock(), retriever=MagicMock())
+        validate_mock = MagicMock(return_value={})
+        with (
+            patch.object(builder._nodes, "classify_query", MagicMock(return_value={
+                "query_type": "chart", "docs_query": "", "standalone_query": "show chart",
+                "wants_chart": False, "rag_result": "N/A", "mcp_result": "N/A",
+            })),
+            patch.object(builder._nodes, "chart_node", MagicMock(return_value={
+                "final_response": "Chart rendered.",
+                "messages": [AIMessage("Chart rendered.")],
+            })),
+            patch.object(builder._nodes, "validate_response", validate_mock),
+        ):
+            app = builder.build(with_memory=False)
+        state: AgentState = {
+            "messages": [HumanMessage("show chart")], "query_type": "",
+            "docs_query": "", "mcp_result": "", "rag_result": "", "final_response": "",
+        }
+        app.invoke(state, config={"recursion_limit": 10})
+        validate_mock.assert_not_called()
+
+    def test_format_response_connects_to_validate_response(self):
+        # Invoke the data path and confirm validate_response is called exactly once.
+        from agent.graph import GraphBuilder
+        from agent.state import AgentState
+        from langchain_core.messages import AIMessage, HumanMessage
+
+        builder = GraphBuilder(llm=MagicMock(), mcp_tools=MagicMock(), retriever=MagicMock())
+        validate_mock = MagicMock(return_value={"validation_score": 1.0, "validation_flagged": False})
+        with (
+            patch.object(builder._nodes, "classify_query", MagicMock(return_value={
+                "query_type": "data", "docs_query": "", "standalone_query": "show issues",
+                "wants_chart": False, "rag_result": "N/A", "mcp_result": "N/A",
+            })),
+            patch.object(builder._nodes, "mcp_node", MagicMock(return_value={
+                "mcp_result": '[get_security_issues]\n[{"id":"ISS-001"}]',
+            })),
+            patch.object(builder._nodes, "format_response", MagicMock(return_value={
+                "final_response": "Found 1 issue.",
+                "messages": [AIMessage("Found 1 issue.")],
+            })),
+            patch.object(builder._nodes, "validate_response", validate_mock),
+        ):
+            app = builder.build(with_memory=False)
+        state: AgentState = {
+            "messages": [HumanMessage("show issues")], "query_type": "",
+            "docs_query": "", "mcp_result": "", "rag_result": "", "final_response": "",
+        }
+        app.invoke(state, config={"recursion_limit": 10})
+        validate_mock.assert_called_once()
 
     def test_graph_routes_mixed_mcp_then_rag(self):
         from agent.graph import GraphBuilder

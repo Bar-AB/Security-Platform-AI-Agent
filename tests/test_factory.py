@@ -51,3 +51,18 @@ class TestAgentFactory:
             mock_idx.return_value.build_index.side_effect = OSError("disk full")
             with pytest.raises(OSError, match="disk full"):
                 AgentFactory.build()
+
+    def test_build_passes_distance_threshold_env_var_to_retriever(self, monkeypatch):
+        monkeypatch.setenv("RAG_DISTANCE_THRESHOLD", "0.3")
+        with (
+            patch.object(_factory_module, "RAGIndexer") as mock_idx,
+            patch.object(_factory_module, "RAGRetriever") as mock_retriever,
+            patch.object(_factory_module, "MCPClient"),
+            patch.object(_factory_module, "SecurityMCPTools"),
+            patch.object(_factory_module, "ChatOpenAI"),
+            patch.object(_factory_module, "GraphBuilder"),
+        ):
+            mock_idx.return_value.is_indexed.return_value = True
+            AgentFactory.build()
+            _, kwargs = mock_retriever.call_args
+            assert kwargs.get("distance_threshold") == pytest.approx(0.3)

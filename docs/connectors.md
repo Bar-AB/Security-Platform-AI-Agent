@@ -3,6 +3,8 @@
 Connectors allow the security platform to ingest vulnerability data from external services.
 Navigate to **Settings → Integrations** to manage connectors.
 
+Available connectors: **Jira**, **GitHub**, **AWS Security Hub**, and **Slack**.
+
 ## Jira Connector
 
 The Jira connector syncs security issues as Jira tickets for team triage.

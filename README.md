@@ -10,22 +10,31 @@ An AI-powered security assistant built with **LangGraph** that answers natural l
 User query
     ↓
 LangGraph Agent
-    ├── Classifier node  →  "data" / "doc" / "mixed"
+    ├── Classifier node  →  "data" / "doc" / "mixed" / "chart"
     │
     ├── data  →  MCP Tool Node  →  FastMCP Mock Server
     │                ↓
     │           get_security_issues / get_applications / get_pipeline_issues
     │
     ├── doc   →  RAG Node  →  ChromaDB  →  docs/*.md
+    │                ↓
+    │           [distance threshold filter — drops off-topic chunks]
     │
-    └── mixed →  both, combined response
+    ├── mixed →  both branches run in parallel, combined response
+    │
+    └── chart →  renders prior-turn data as chart  →  END (bypasses validator)
                     ↓
-              Format Response Node  →  deterministic renderer (data)
+              Format Response Node  →  [no-context guard] → "I don't have info" if nothing retrieved
+                                    →  deterministic renderer (pure data)
                                     →  LLM formatter (aggregation / mixed)
-                                    →  chart auto-generated + opened (matplotlib)
+                    ↓
+              Validate Response Node  →  LLM-as-Judge (groundedness 0–1)
+                                      →  appends ⚠️ warning if score < 0.7
 ```
 
 **Conversation memory** is persisted per session via LangGraph's `MemorySaver`, with follow-up resolution: the classifier uses recent history to rewrite context-dependent questions (e.g. "what are the steps?") into self-contained queries before routing.
+
+**Hallucination prevention** runs at two layers: the RAG distance filter drops low-quality chunks before they reach the LLM, and `validate_response` (LLM-as-Judge) scores the final answer against the retrieved context and appends a warning when claims can't be verified.
 
 ---
 
@@ -35,7 +44,9 @@ LangGraph Agent
 - **Full filter coverage** — severity, CVE ID, application/service, keyword, date ranges, pipeline, stage, scanner tool, git branch
 - **Deterministic rendering** — data results are rendered directly as markdown so the LLM can't drop rows; LLM formatter is used only for aggregation queries ("how many…", "total…")
 - **Chart generation** — severity distribution and top vulnerable apps charts auto-open in Preview after any data query
-- **RAG over docs** — semantic search over `docs/connectors.md` and `docs/dashboard.md` with source attribution
+- **RAG over docs** — semantic search over `docs/connectors.md` and `docs/dashboard.md` with source attribution; breadcrumb-enriched chunks so child sections retain parent header context in embeddings
+- **RAG confidence threshold** — chunks above a configurable cosine distance threshold are filtered before reaching the LLM; fully off-topic queries return an "I don't have information" message without calling the LLM (`RAG_DISTANCE_THRESHOLD`, default `0.5`)
+- **LLM-as-Judge validation** — a `validate_response` node scores every response for groundedness (0–1); responses below `0.7` get a `⚠️ Validation warning` block listing unverified claims
 - **Multi-turn follow-ups** — per-session memory plus query contextualization, so "what are the steps?" resolves against the previous turn
 - **Mock security platform** — realistic CVE-style data served via FastMCP (no external credentials needed)
 
@@ -77,6 +88,9 @@ pip install -r requirements.txt
 ```bash
 cp .env.example .env
 # add your OPENAI_API_KEY
+# optional tuning:
+# RAG_DISTANCE_THRESHOLD=0.5   (cosine distance cutoff for RAG chunk filtering; lower = stricter)
+# RAG_TOP_K=5                  (number of chunks retrieved before filtering)
 ```
 
 **3. Start the mock MCP server**
@@ -103,6 +117,9 @@ Show me Semgrep findings from the auth pipeline
 How many issues were discovered in November 2024?
 What are the SAST findings on the main branch?
 How do I connect Jira to the platform?
+What connectors are available on the platform?
+Are there any Jira connector issues?
+How do I configure a Kubernetes load balancer?   → returns "I don't have information about that"
 ```
 
 Follow-up questions work within a conversation — the agent resolves them against prior turns:
@@ -112,6 +129,15 @@ Follow-up questions work within a conversation — the agent resolves them again
   ...(answers with the setup steps)
 > What are the steps?
   ...(knows you still mean the GitHub connector)
+```
+
+The validator appends a confidence warning when the LLM makes claims not found in retrieved data:
+
+```
+> Show me issues in payment-service
+  ...(lists issues with CVE details)
+> What other CVEs did you mention that weren't in that list?
+  ⚠️ Validation warning (confidence: 48%): some claims could not be verified...
 ```
 
 ---
