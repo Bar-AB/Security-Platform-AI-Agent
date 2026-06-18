@@ -171,11 +171,24 @@ class AgentNodes:
         try:
             docs = self._retriever.retrieve(retrieval_query)
             if not docs:
-                return {"rag_result": "No relevant documentation found."}
-            return {"rag_result": self._retriever.format_for_prompt(docs)}
+                return {
+                    "rag_result": "No relevant documentation found.",
+                    "rag_distances": [],
+                    "rag_chunks_returned": 0,
+                }
+            distances = [round(doc.metadata.get("distance", 0.0), 3) for doc in docs]
+            return {
+                "rag_result": self._retriever.format_for_prompt(docs),
+                "rag_distances": distances,
+                "rag_chunks_returned": len(docs),
+            }
         except Exception:
             logger.exception("RAG node failed for query: %s", query[:50])
-            return {"rag_result": "Error retrieving documentation."}
+            return {
+                "rag_result": "Error retrieving documentation.",
+                "rag_distances": [],
+                "rag_chunks_returned": 0,
+            }
 
     _GROUNDEDNESS_THRESHOLD: float = 0.7
 

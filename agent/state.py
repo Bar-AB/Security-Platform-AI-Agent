@@ -31,3 +31,5 @@ class AgentState(TypedDict):
     wants_chart: NotRequired[bool]
     validation_score: NotRequired[float]
     validation_flagged: NotRequired[bool]
+    rag_distances: NotRequired[list[float]]
+    rag_chunks_returned: NotRequired[int]

@@ -47,6 +47,7 @@ LangGraph Agent
 - **RAG over docs** — semantic search over `docs/connectors.md` and `docs/dashboard.md` with source attribution; breadcrumb-enriched chunks so child sections retain parent header context in embeddings
 - **RAG confidence threshold** — chunks above a configurable cosine distance threshold are filtered before reaching the LLM; fully off-topic queries return an "I don't have information" message without calling the LLM (`RAG_DISTANCE_THRESHOLD`, default `0.5`)
 - **LLM-as-Judge validation** — a `validate_response` node scores every response for groundedness (0–1); responses below `0.7` get a `⚠️ Validation warning` block listing unverified claims
+- **LangSmith observability** — optional tracing via env vars; every graph run, LLM call, and node I/O is captured automatically; RAG distances and groundedness scores are surfaced as structured output fields per trace
 - **Multi-turn follow-ups** — per-session memory plus query contextualization, so "what are the steps?" resolves against the previous turn
 - **Mock security platform** — realistic CVE-style data served via FastMCP (no external credentials needed)
 
@@ -62,6 +63,7 @@ LangGraph Agent
 | Embeddings | `text-embedding-3-small` |
 | MCP server | FastMCP (mcp >= 1.0) |
 | Charts | Matplotlib |
+| Observability | LangSmith (optional) |
 | Language | Python 3.12 |
 
 ---
@@ -91,6 +93,10 @@ cp .env.example .env
 # optional tuning:
 # RAG_DISTANCE_THRESHOLD=0.5   (cosine distance cutoff for RAG chunk filtering; lower = stricter)
 # RAG_TOP_K=5                  (number of chunks retrieved before filtering)
+# LangSmith tracing (optional — create a free account at smith.langchain.com):
+# LANGCHAIN_TRACING_V2=true
+# LANGCHAIN_API_KEY=ls__...
+# LANGCHAIN_PROJECT=security-platform-agent
 ```
 
 **3. Start the mock MCP server**

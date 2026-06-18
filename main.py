@@ -19,6 +19,10 @@ def main() -> None:
         print("Error: OPENAI_API_KEY not set. Add it to your .env file.")
         sys.exit(1)
 
+    if os.getenv("LANGCHAIN_TRACING_V2", "").lower() == "true":
+        project = os.getenv("LANGCHAIN_PROJECT", "default")
+        logger.info("LangSmith tracing enabled — project: %s", project)
+
     print("Security Platform AI Agent")
     print("Type 'exit' to quit.\n")
 
