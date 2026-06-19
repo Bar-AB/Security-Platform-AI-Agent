@@ -73,8 +73,8 @@ class AgentNodes:
         # result (state is persisted per thread). The "chart" route is exempt: it reuses the
         # previous turn's mcp_result ("now chart that").
         if query_type == "chart":
-            return {"rag_result": "N/A"}
-        return {"mcp_result": "N/A", "rag_result": "N/A"}
+            return {"rag_result": "N/A", "rag_distances": [], "rag_chunks_returned": 0}
+        return {"mcp_result": "N/A", "rag_result": "N/A", "rag_distances": [], "rag_chunks_returned": 0}
 
     @staticmethod
     def _format_history(messages: list[BaseMessage], max_messages: int = 6) -> str:

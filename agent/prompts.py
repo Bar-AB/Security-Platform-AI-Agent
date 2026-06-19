@@ -89,6 +89,11 @@ CONTEXT:
 {context}
 
 Rules:
+- CRITICAL: Use ONLY the CONTEXT above to verify claims. Do NOT use your own training knowledge.
+  If a claim is not explicitly present in the CONTEXT text, it is unverified — even if it is
+  factually correct in the real world.
+- Any numerical value (scores, counts, percentages, version numbers) not present verbatim in
+  the CONTEXT must be flagged.
 - Specific claims must match exactly: CVE IDs, severity levels, app names, counts, dates, scores.
 - If a context section is "N/A", it provides no grounding.
 - General qualitative statements (e.g. "you should patch this") are always grounded.
