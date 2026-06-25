@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from datetime import date
@@ -51,20 +52,22 @@ class AgentNodes:
                 standalone[:60],
             )
             return {
+                **self._fresh_results(query_type),
                 "query_type": query_type,
                 "docs_query": result.docs_query,
                 "standalone_query": standalone,
                 "wants_chart": wants_chart,
-                **self._fresh_results(query_type),
+                "group_by_field": self._detect_group_by(standalone),
             }
         except Exception:
             logger.exception("Classification failed, defaulting to 'mixed'")
             return {
+                **self._fresh_results("mixed"),
                 "query_type": "mixed",
                 "docs_query": query,
                 "standalone_query": query,
                 "wants_chart": wants_chart,
-                **self._fresh_results("mixed"),
+                "group_by_field": self._detect_group_by(query),
             }
 
     @staticmethod
@@ -73,8 +76,12 @@ class AgentNodes:
         # result (state is persisted per thread). The "chart" route is exempt: it reuses the
         # previous turn's mcp_result ("now chart that").
         if query_type == "chart":
-            return {"rag_result": "N/A", "rag_distances": [], "rag_chunks_returned": 0}
-        return {"mcp_result": "N/A", "rag_result": "N/A", "rag_distances": [], "rag_chunks_returned": 0}
+            return {"rag_result": "N/A", "rag_distances": [], "rag_chunks_returned": 0, "chart_image": None, "group_by_field": None}
+        return {
+            "mcp_result": "N/A", "rag_result": "N/A",
+            "rag_distances": [], "rag_chunks_returned": 0,
+            "chart_image": None, "group_by_field": None,
+        }
 
     @staticmethod
     def _format_history(messages: list[BaseMessage], max_messages: int = 6) -> str:
@@ -94,6 +101,14 @@ class AgentNodes:
         return "\n".join(lines) if lines else "(no prior conversation)"
 
     @staticmethod
+    def _detect_group_by(query: str) -> str | None:
+        q = query.lower()
+        for phrase, field in AgentNodes._GROUP_BY_FIELDS.items():
+            if phrase in q:
+                return field
+        return None
+
+    @staticmethod
     def _build_mcp_system() -> SystemMessage:
         today = date.today().isoformat()
         return SystemMessage(
@@ -101,6 +116,10 @@ class AgentNodes:
             "You have three tools: get_security_issues, get_applications, get_pipeline_issues.\n\n"
             "TOOL ROUTING — follow these rules exactly:\n\n"
             "FILTERING:\n"
+            "- By exact ID ('ISS-003', 'PIPE-006', 'show me ISS-001'): "
+            "use get_security_issues(id='ISS-003') for ISS-* IDs, "
+            "get_pipeline_issues(id='PIPE-006') for PIPE-* IDs. "
+            "Always prefer id lookup when the user provides an exact ID.\n"
             "- By service/app ('issues in payment-service', 'what affects auth?'): "
             "call BOTH get_security_issues(application='<name>') AND "
             "get_pipeline_issues(pipeline='<name>-ci'). "
@@ -136,33 +155,50 @@ class AgentNodes:
             "one with severity='high' — then combine results in your answer.\n\n"
             "COUNT/TOTAL QUERIES:\n"
             "- When the user asks 'how many', 'how much', 'total', or 'count', always state the "
-            "exact number clearly in your answer (e.g. 'There are 3 issues in auth-service: 1 security issue and 2 pipeline findings.').\n\n"
+            "exact number clearly in your answer (e.g. 'There are 3 issues in auth-service: 1 security issue and 2 pipeline findings.').\n"
+            "- Always include ALL statuses (open, in_progress, resolved) in counts unless the user "
+            "explicitly asks for open or active issues only.\n"
+            "- Never add a limit parameter to any tool call unless the user explicitly specified a "
+            "maximum number of results (e.g. 'show me the top 5').\n\n"
             "GENERAL FINDINGS:\n"
             "- For 'all issues' or unspecific queries: call BOTH get_security_issues AND get_pipeline_issues. "
             "If the user says 'security issues', call ONLY get_security_issues.\n\n"
             "Never guess or fabricate data. If filters return no results, say so clearly."
         )
 
-    def mcp_node(self, state: AgentState) -> dict:
+    async def mcp_node(self, state: AgentState) -> dict:
         query = state.get("standalone_query") or cast(
             str, state["messages"][-1].content
         )
         tools = self._mcp_tools.as_langchain_tools()
+
+        # For group-by aggregation queries, bypass LLM tool-selection entirely.
+        # The LLM tends to add implicit filters (status='open', per-value calls) that
+        # silently drop rows. Fetching both tools with no args guarantees complete data.
+        if state.get("group_by_field"):
+            try:
+                iss = await self._mcp_tools.get_security_issues()
+                pipe = await self._mcp_tools.get_pipeline_issues()
+                tool_results = f"[get_security_issues]\n{iss}\n\n[get_pipeline_issues]\n{pipe}"
+                return {"mcp_result": tool_results, "chart_image": None}
+            except Exception:
+                logger.exception("Direct fetch failed for group-by query — falling back to LLM")
+
         try:
             llm_with_tools = self._llm.bind_tools(tools)
-            response = llm_with_tools.invoke(
+            response = await llm_with_tools.ainvoke(
                 [self._build_mcp_system(), HumanMessage(query)]
             )
             if response.tool_calls:
-                tool_results = self._execute_tool_calls(response.tool_calls, tools)
-                if state.get("wants_chart"):
-                    self._try_generate_chart(tool_results)
-                return {"mcp_result": tool_results}
-            return {"mcp_result": response.content}
+                tool_results = await self._execute_tool_calls_async(response.tool_calls)
+                chart_b64 = self._try_generate_chart(tool_results) if state.get("wants_chart") else None
+                return {"mcp_result": tool_results, "chart_image": chart_b64}
+            return {"mcp_result": response.content, "chart_image": None}
         except Exception:
             logger.exception("MCP node failed for query: %s", query[:50])
             return {
-                "mcp_result": "Error fetching security data. The platform may be unavailable."
+                "mcp_result": "Error fetching security data. The platform may be unavailable.",
+                "chart_image": None,
             }
 
     def rag_node(self, state: AgentState) -> dict:
@@ -195,6 +231,20 @@ class AgentNodes:
     _AGGREGATION_KEYWORDS = frozenset(
         ["how many", "how much", "in total", "total", "count", "how much there"]
     )
+    # Maps query phrases to the JSON field to group by. Detected once in classify_query
+    # and stored in state so mcp_node and format_response don't duplicate the logic.
+    _GROUP_BY_FIELDS: dict[str, str] = {
+        "by severity": "severity",       "per severity": "severity",
+        "severity breakdown": "severity", "severity distribution": "severity",
+        "count by severity": "severity",
+        "by application": "application",  "per application": "application",
+        "by service": "application",      "per service": "application",
+        "application breakdown": "application",
+        "by category": "category",        "per category": "category",
+        "category breakdown": "category",
+        "by status": "status",            "per status": "status",
+        "status breakdown": "status",
+    }
     _CHART_KEYWORDS = frozenset(
         ["chart", "graph", "visualize", "visualization", "plot"]
     )
@@ -224,12 +274,61 @@ class AgentNodes:
         ]
     )
 
+    _SEVERITY_ORDER: list[str] = ["critical", "high", "medium", "low"]
+
     # rag_node returns these strings when there is nothing useful to pass to the formatter.
     _EMPTY_RESULTS = frozenset({
         "N/A",
         "No relevant documentation found.",
         "Error retrieving documentation.",
     })
+
+    @staticmethod
+    def _count_by_field(mcp_result: str, field: str) -> str | None:
+        from collections import defaultdict
+        counts: dict[str, list[str]] = defaultdict(list)
+        try:
+            for chunk in mcp_result.split("\n\n"):
+                chunk = chunk.strip()
+                if not chunk:
+                    continue
+                _, _, body = chunk.partition("\n")
+                if not body:
+                    continue
+                items = json.loads(body)
+                if not isinstance(items, list):
+                    continue
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
+                    value = item.get(field)
+                    if value is None:
+                        continue
+                    id_ = item.get("id", "")
+                    title = item.get("title", id_)
+                    counts[str(value)].append(f"{title} ({id_})" if id_ else title)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            return None
+        if not counts:
+            return None
+        keys = (
+            [k for k in AgentNodes._SEVERITY_ORDER if k in counts]
+            + sorted(k for k in counts if k not in AgentNodes._SEVERITY_ORDER)
+            if field == "severity"
+            else sorted(counts)
+        )
+        lines: list[str] = [f"Based on the provided data, here are the counts of issues by {field}:\n"]
+        summary: list[str] = []
+        for key in keys:
+            items_for_key = counts[key]
+            lines.append(f"**{key.replace('_', ' ').title()}:**")
+            for i, title in enumerate(items_for_key, 1):
+                lines.append(f"{i}. {title}")
+            lines.append("")
+            summary.append(f"{len(items_for_key)} {key}")
+        total = sum(len(v) for v in counts.values())
+        lines.append(f"In summary: there are {', '.join(summary)}, and **{total} issues total**.")
+        return "\n".join(lines)
 
     def format_response(self, state: AgentState) -> dict:
         query = state.get("standalone_query") or cast(
@@ -238,16 +337,7 @@ class AgentNodes:
         mcp_result = state.get("mcp_result") or "N/A"
         rag_result = state.get("rag_result") or "N/A"
         try:
-            # Render pure data deterministically so no rows get dropped; aggregation queries
-            # still go through the LLM to synthesize a count.
-            is_aggregation = any(
-                kw in query.lower() for kw in self._AGGREGATION_KEYWORDS
-            )
-            chart_note = (
-                "Chart generated and opened in your default image viewer.\n\n"
-                if state.get("wants_chart")
-                else ""
-            )
+            is_aggregation = any(kw in query.lower() for kw in self._AGGREGATION_KEYWORDS)
             # No context from either source — don't let the LLM answer from training data.
             if mcp_result in self._EMPTY_RESULTS and rag_result in self._EMPTY_RESULTS:
                 return self._emit(
@@ -255,10 +345,16 @@ class AgentNodes:
                     "or security data. Try asking about connectors, dashboards, security "
                     "issues, applications, or pipeline findings."
                 )
+            # Deterministic group-by path: avoids LLM excluding rows or miscounting.
+            group_by_field = state.get("group_by_field")
+            if group_by_field and rag_result == "N/A" and mcp_result != "N/A":
+                det = self._count_by_field(mcp_result, group_by_field)
+                if det:
+                    return self._emit(det)
+            # Render pure data deterministically so no rows get dropped; other aggregation
+            # queries go through the LLM to synthesize a count or narrative.
             if rag_result == "N/A" and mcp_result != "N/A" and not is_aggregation:
-                return self._emit(
-                    chart_note + self._format_mcp_as_markdown(mcp_result)
-                )
+                return self._emit(self._format_mcp_as_markdown(mcp_result))
             response = self._formatter.invoke(
                 {
                     "query": query,
@@ -267,9 +363,7 @@ class AgentNodes:
                 }
             )
             sources_footer = self._build_sources_footer(rag_result)
-            return self._emit(
-                chart_note + cast(str, response.content) + sources_footer
-            )
+            return self._emit(cast(str, response.content) + sources_footer)
         except Exception:
             logger.exception("Formatter failed")
             return self._emit("Sorry, I could not generate a response.")
@@ -282,12 +376,14 @@ class AgentNodes:
     def chart_node(self, state: AgentState) -> dict:
         mcp_result = state.get("mcp_result") or ""
         if not mcp_result or mcp_result == "N/A":
-            return self._emit(
-                "No data available to chart. Please run a data query first."
-            )
-        self._try_generate_chart(mcp_result)
+            return {
+                **self._emit("No data available to chart. Please run a data query first."),
+                "chart_image": None,
+            }
+        chart_b64 = self._try_generate_chart(mcp_result)
         formatted = self._format_mcp_as_markdown(mcp_result)
-        return self._emit(f"Chart generated from previous results.\n\n{formatted}")
+        msg = "Chart generated from previous results.\n\n" + formatted
+        return {**self._emit(msg), "chart_image": chart_b64}
 
     @staticmethod
     def _build_sources_footer(rag_result: str) -> str:
@@ -335,7 +431,14 @@ class AgentNodes:
             sections.append("\n".join(lines))
         return "\n\n---\n\n".join(sections)
 
-    def _try_generate_chart(self, mcp_result: str) -> None:
+    def _try_generate_chart(self, mcp_result: str) -> str | None:
+        try:
+            return self._generate_chart(mcp_result)
+        except Exception:
+            logger.exception("Chart generation failed — data will still be returned")
+            return None
+
+    def _generate_chart(self, mcp_result: str) -> str | None:
         severity_items: list[dict] = []
         app_items: list[dict] = []
         for chunk in mcp_result.split("\n\n"):
@@ -354,11 +457,14 @@ class AgentNodes:
             elif "risk_score" in data[0]:
                 app_items.extend(data)
         if severity_items:
-            path = self._charts.severity_distribution(severity_items)
-            logger.info("Chart saved to %s", path)
+            b64 = self._charts.severity_distribution(severity_items)
+            logger.info("Chart generated (%d bytes base64)", len(b64))
+            return b64
         if app_items:
-            path = self._charts.top_vulnerable_apps(app_items)
-            logger.info("Chart saved to %s", path)
+            b64 = self._charts.top_vulnerable_apps(app_items)
+            logger.info("Chart generated (%d bytes base64)", len(b64))
+            return b64
+        return None
 
     def validate_response(self, state: AgentState) -> dict:
         response = state.get("final_response", "")
@@ -415,17 +521,23 @@ class AgentNodes:
             logger.exception("Response validation failed — skipping")
             return {"validation_score": 1.0, "validation_flagged": False}
 
-    def _execute_tool_calls(self, tool_calls: list, tools: list) -> str:
-        tool_map = {t.name: t for t in tools}
-        results: list[str] = []
-        for call in tool_calls:
-            tool = tool_map.get(call["name"])
-            if not tool:
-                continue
+    async def _execute_tool_calls_async(self, tool_calls: list) -> str:
+        _TOOL_MAP = {
+            "get_security_issues": self._mcp_tools.get_security_issues,
+            "get_applications": self._mcp_tools.get_applications,
+            "get_pipeline_issues": self._mcp_tools.get_pipeline_issues,
+        }
+
+        async def _run_one(call: dict) -> str | None:
+            fn = _TOOL_MAP.get(call["name"])
+            if not fn:
+                return None
             try:
-                output = tool.invoke(call["args"])
-                results.append(f"[{call['name']}]\n{output}")
+                output = await fn(**call["args"])
+                return f"[{call['name']}]\n{output}"
             except Exception:
-                logger.exception("Tool call failed: %s", call["name"])
-                results.append(f"[{call['name']}] Error: tool call failed.")
-        return "\n\n".join(results)
+                logger.exception("Async tool call failed: %s", call["name"])
+                return f"[{call['name']}] Error: tool call failed."
+
+        results = await asyncio.gather(*(_run_one(call) for call in tool_calls))
+        return "\n\n".join(r for r in results if r is not None)

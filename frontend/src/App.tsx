@@ -2,7 +2,8 @@ import { useState, useRef, useEffect } from 'react'
 import { ChatMessage } from './components/ChatMessage'
 import { ChatInput } from './components/ChatInput'
 import { TypingIndicator } from './components/TypingIndicator'
-import { sendMessage } from './api'
+import { streamMessage } from './api'
+import type { StreamDoneEvent } from './api'
 import type { Message, QueryType } from './types'
 
 const THREAD_ID = crypto.randomUUID()
@@ -10,11 +11,12 @@ const THREAD_ID = crypto.randomUUID()
 export default function App() {
   const [messages, setMessages] = useState<Message[]>([])
   const [isLoading, setIsLoading] = useState(false)
+  const [streamingStatus, setStreamingStatus] = useState<string | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, isLoading])
+    bottomRef.current?.scrollIntoView({ behavior: 'instant' })
+  }, [messages])
 
   const handleSend = async (text: string) => {
     const userMsg: Message = {
@@ -24,30 +26,86 @@ export default function App() {
     }
     setMessages(prev => [...prev, userMsg])
     setIsLoading(true)
+    setStreamingStatus(null)
 
-    try {
-      const data = await sendMessage(text, THREAD_ID)
-      setMessages(prev => [
-        ...prev,
-        {
-          id: crypto.randomUUID(),
-          role: 'assistant',
-          content: data.response,
-          queryType: data.query_type as QueryType,
-        },
-      ])
-    } catch {
-      setMessages(prev => [
-        ...prev,
-        {
-          id: crypto.randomUUID(),
-          role: 'assistant',
-          content: 'Error: could not reach the agent. Is the API server running?',
-        },
-      ])
-    } finally {
-      setIsLoading(false)
-    }
+    // Placeholder assistant message updated token-by-token
+    const assistantId = crypto.randomUUID()
+    setMessages(prev => [
+      ...prev,
+      { id: assistantId, role: 'assistant', content: '', isStreaming: true },
+    ])
+
+    // Accumulate tokens in a plain object ref to avoid stale closure issues.
+    // rAF batching caps DOM updates to ~60fps instead of one-per-token.
+    const acc = { current: '' }
+    const raf = { current: null as number | null }
+    let statusCleared = false
+
+    await streamMessage(
+      text,
+      THREAD_ID,
+      // onToken
+      (token) => {
+        if (!statusCleared) {
+          statusCleared = true
+          setStreamingStatus(null)
+        }
+        acc.current += token
+        if (raf.current === null) {
+          raf.current = requestAnimationFrame(() => {
+            raf.current = null
+            setMessages(prev =>
+              prev.map(m => m.id === assistantId ? { ...m, content: acc.current } : m)
+            )
+          })
+        }
+      },
+      // onDone
+      (meta: StreamDoneEvent) => {
+        if (raf.current !== null) {
+          cancelAnimationFrame(raf.current)
+          raf.current = null
+        }
+        setStreamingStatus(null)
+        const content = acc.current || meta.final_response || 'No response generated.'
+        setMessages(prev =>
+          prev.map(m =>
+            m.id === assistantId
+              ? {
+                  ...m,
+                  content,
+                  isStreaming: false,
+                  queryType: meta.query_type as QueryType,
+                  confidenceScore: meta.confidence_score,
+                  validationFlagged: meta.validation_flagged,
+                  chartImage: meta.chart_image ?? undefined,
+                }
+              : m
+          )
+        )
+        setIsLoading(false)
+      },
+      // onError
+      (errMsg) => {
+        if (raf.current !== null) {
+          cancelAnimationFrame(raf.current)
+          raf.current = null
+        }
+        setStreamingStatus(null)
+        setMessages(prev =>
+          prev.map(m =>
+            m.id === assistantId
+              ? { ...m, content: `Error: ${errMsg}`, isStreaming: false }
+              : m
+          )
+        )
+        setIsLoading(false)
+      },
+      // onStatus
+      (statusText: string) => {
+        setStreamingStatus(statusText)
+      },
+    )
   }
 
   return (
@@ -94,10 +152,14 @@ export default function App() {
           <ChatMessage key={msg.id} message={msg} />
         ))}
 
-        {isLoading && (
+        {isLoading && !messages.some(m => m.isStreaming && m.content.length > 0) && (
           <div className="flex justify-start mb-4">
             <div className="bg-[#21262d] rounded-2xl rounded-bl-sm">
-              <TypingIndicator />
+              {streamingStatus ? (
+                <p className="px-4 py-3 text-xs text-[#8b949e] italic">{streamingStatus}</p>
+              ) : (
+                <TypingIndicator />
+              )}
             </div>
           </div>
         )}

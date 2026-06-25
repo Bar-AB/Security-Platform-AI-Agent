@@ -4,6 +4,9 @@ import chromadb
 from chromadb import QueryResult
 from langchain_core.documents import Document
 from langchain_openai import OpenAIEmbeddings
+from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import SystemMessage, HumanMessage as _HumanMessage
+
 
 logger = logging.getLogger(__name__)
 
@@ -74,3 +77,53 @@ class RAGRetriever:
                 self._distance_threshold,
             )
         return docs
+
+
+
+_MULTI_QUERY_PROMPT = (
+    "Generate 3 alternative phrasings of the following search query for a security platform "
+    "documentation knowledge base. Each phrasing should capture the same intent from a "
+    "different angle. Return ONLY the 3 queries, one per line, no numbering, no extra text.\n\n"
+    "Original query: {query}"
+)
+
+_MAX_VARIANTS = 3
+
+class MultiQueryRAGRetriever(RAGRetriever):
+    def __init__(
+        self,
+        persist_dir: str,
+        llm: BaseChatModel,
+        k: int = _DEFAULT_K,
+        distance_threshold: float = _DEFAULT_DISTANCE_THRESHOLD,
+    ) -> None:
+        super().__init__(persist_dir=persist_dir, k=k, distance_threshold=distance_threshold)
+        self._llm = llm
+
+    def retrieve(self, query: str) -> list[Document]:
+        queries = self._generate_queries(query)
+        seen: set[str] = set()
+        docs: list[Document] = []
+        for q in queries:
+            for doc in super().retrieve(q):
+                if doc.page_content not in seen:
+                    seen.add(doc.page_content)
+                    docs.append(doc)
+        logger.debug(
+            "MultiQueryRAG: %d unique chunks from %d queries", len(docs), len(queries)
+        )
+        return docs
+
+    def _generate_queries(self, query: str) -> list[str]:
+        try:
+            prompt = _MULTI_QUERY_PROMPT.format(query=query)
+            response = self._llm.invoke(
+                [SystemMessage(content=prompt), _HumanMessage(content=query)]
+            )
+            raw = response.content
+            content = raw if isinstance(raw, str) else str(raw)
+            variants = [line.strip() for line in content.strip().splitlines() if line.strip()]
+            return [query] + variants[:_MAX_VARIANTS]
+        except Exception:
+            logger.exception("Multi-query generation failed — falling back to single query")
+            return [query]

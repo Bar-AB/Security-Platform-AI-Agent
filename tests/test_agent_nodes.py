@@ -1,5 +1,6 @@
+import asyncio
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from langchain_core.messages import AIMessage, HumanMessage
 
 
@@ -257,9 +258,11 @@ class TestMCPNode:
         llm = MagicMock()
         llm.with_structured_output.return_value.invoke.return_value = MagicMock()
         mcp_tools = MagicMock()
-        mcp_tools.get_security_issues.return_value = (
-            '[{"id": "ISS-001", "title": "SQL Injection"}]'
+        mcp_tools.get_security_issues = AsyncMock(
+            return_value='[{"id": "ISS-001", "title": "SQL Injection"}]'
         )
+        mcp_tools.get_applications = AsyncMock(return_value="[]")
+        mcp_tools.get_pipeline_issues = AsyncMock(return_value="[]")
         retriever = MagicMock()
         from agent.nodes import AgentNodes
 
@@ -276,11 +279,13 @@ class TestMCPNode:
             "final_response": "",
         }
         with patch.object(nodes._llm, "bind_tools") as mock_bind:
-            mock_bind.return_value.invoke.return_value = MagicMock(
-                content="Found 1 critical issue",
-                tool_calls=[],
+            mock_bind.return_value.ainvoke = AsyncMock(
+                return_value=MagicMock(
+                    content="Found 1 critical issue",
+                    tool_calls=[],
+                )
             )
-            result = nodes.mcp_node(state)
+            result = asyncio.run(nodes.mcp_node(state))
         assert "mcp_result" in result
 
     def test_mcp_node_handles_exception_gracefully(self, nodes):
@@ -294,7 +299,7 @@ class TestMCPNode:
             "final_response": "",
         }
         with patch.object(nodes._llm, "bind_tools", side_effect=Exception("LLM error")):
-            result = nodes.mcp_node(state)
+            result = asyncio.run(nodes.mcp_node(state))
         assert "mcp_result" in result
         assert "Error" in result["mcp_result"]
 
@@ -434,14 +439,14 @@ class TestMCPNodeChartGuard:
             content="results",
             tool_calls=[MagicMock(name="get_security_issues", args={})],
         )
-        nodes._llm.bind_tools.return_value.invoke.return_value = tool_response
+        nodes._llm.bind_tools.return_value.ainvoke = AsyncMock(return_value=tool_response)
         nodes._mcp_tools.as_langchain_tools.return_value = []
 
         with (
             patch.object(nodes, "_try_generate_chart") as mock_chart,
-            patch.object(nodes, "_execute_tool_calls", return_value="[result]"),
+            patch.object(nodes, "_execute_tool_calls_async", new=AsyncMock(return_value="[result]")),
         ):
-            nodes.mcp_node(self._make_state(wants_chart=False))
+            asyncio.run(nodes.mcp_node(self._make_state(wants_chart=False)))
             mock_chart.assert_not_called()
 
     def test_chart_generated_when_wants_chart_true(self, nodes):
@@ -449,14 +454,14 @@ class TestMCPNodeChartGuard:
             content="results",
             tool_calls=[MagicMock(name="get_security_issues", args={})],
         )
-        nodes._llm.bind_tools.return_value.invoke.return_value = tool_response
+        nodes._llm.bind_tools.return_value.ainvoke = AsyncMock(return_value=tool_response)
         nodes._mcp_tools.as_langchain_tools.return_value = []
 
         with (
             patch.object(nodes, "_try_generate_chart") as mock_chart,
-            patch.object(nodes, "_execute_tool_calls", return_value="[result]"),
+            patch.object(nodes, "_execute_tool_calls_async", new=AsyncMock(return_value="[result]")),
         ):
-            nodes.mcp_node(self._make_state(wants_chart=True))
+            asyncio.run(nodes.mcp_node(self._make_state(wants_chart=True)))
             mock_chart.assert_called_once_with("[result]")
 
 

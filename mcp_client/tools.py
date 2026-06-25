@@ -1,5 +1,6 @@
 import json
 import logging
+from typing import Any
 
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
@@ -10,6 +11,9 @@ logger = logging.getLogger(__name__)
 
 
 class _GetIssuesInput(BaseModel):
+    id: str | None = Field(
+        None, description="Exact issue ID to look up (e.g. 'ISS-001'). Returns a single issue."
+    )
     severity: str | None = Field(
         None, description="Filter by severity: critical, high, medium, low"
     )
@@ -54,6 +58,9 @@ class _GetApplicationsInput(BaseModel):
 
 
 class _GetPipelineIssuesInput(BaseModel):
+    id: str | None = Field(
+        None, description="Exact finding ID to look up (e.g. 'PIPE-006'). Returns a single finding."
+    )
     severity: str | None = Field(
         None, description="Filter by severity: critical, high, medium, low"
     )
@@ -92,8 +99,19 @@ class SecurityMCPTools:
     def __init__(self, client: MCPClient) -> None:
         self._client = client
 
-    def get_security_issues(
+    async def _async_call(self, tool_name: str, args: dict[str, Any]) -> str:
+        try:
+            results = await self._client.call_tool(tool_name, args)
+        except Exception:
+            logger.exception("Async MCP tool call failed: %s", tool_name)
+            return "[]"
+        if not results:
+            return "[]"
+        return json.dumps(results, indent=2)
+
+    async def get_security_issues(
         self,
+        id: str | None = None,
         severity: str | None = None,
         category: str | None = None,
         status: str | None = None,
@@ -104,9 +122,10 @@ class SecurityMCPTools:
         discovered_before: str | None = None,
         limit: int | None = None,
     ) -> str:
-        results = self._client.call_tool_sync(
+        return await self._async_call(
             "get_security_issues",
             {
+                "id": id,
                 "severity": severity,
                 "category": category,
                 "status": status,
@@ -118,24 +137,20 @@ class SecurityMCPTools:
                 "limit": limit,
             },
         )
-        if not results:
-            return "No security issues found matching the given filters."
-        return json.dumps(results, indent=2)
 
-    def get_applications(
+    async def get_applications(
         self,
         min_risk_score: float | None = None,
         limit: int | None = None,
     ) -> str:
-        results = self._client.call_tool_sync(
-            "get_applications", {"min_risk_score": min_risk_score, "limit": limit}
+        return await self._async_call(
+            "get_applications",
+            {"min_risk_score": min_risk_score, "limit": limit},
         )
-        if not results:
-            return "No applications found."
-        return json.dumps(results, indent=2)
 
-    def get_pipeline_issues(
+    async def get_pipeline_issues(
         self,
+        id: str | None = None,
         severity: str | None = None,
         pipeline: str | None = None,
         stage: str | None = None,
@@ -146,9 +161,10 @@ class SecurityMCPTools:
         detected_before: str | None = None,
         limit: int | None = None,
     ) -> str:
-        results = self._client.call_tool_sync(
+        return await self._async_call(
             "get_pipeline_issues",
             {
+                "id": id,
                 "severity": severity,
                 "pipeline": pipeline,
                 "stage": stage,
@@ -160,14 +176,11 @@ class SecurityMCPTools:
                 "limit": limit,
             },
         )
-        if not results:
-            return "No pipeline issues found matching the given filters."
-        return json.dumps(results, indent=2)
 
     def as_langchain_tools(self) -> list[StructuredTool]:
         return [
             StructuredTool.from_function(
-                func=self.get_security_issues,
+                coroutine=self.get_security_issues,
                 name="get_security_issues",
                 description=(
                     "Fetch security issues. Supports filtering by severity, category, status, "
@@ -177,7 +190,7 @@ class SecurityMCPTools:
                 args_schema=_GetIssuesInput,
             ),
             StructuredTool.from_function(
-                func=self.get_applications,
+                coroutine=self.get_applications,
                 name="get_applications",
                 description=(
                     "Fetch applications sorted by risk score (highest first). "
@@ -187,7 +200,7 @@ class SecurityMCPTools:
                 args_schema=_GetApplicationsInput,
             ),
             StructuredTool.from_function(
-                func=self.get_pipeline_issues,
+                coroutine=self.get_pipeline_issues,
                 name="get_pipeline_issues",
                 description=(
                     "Fetch CI/CD pipeline security findings. Supports filtering by severity, "

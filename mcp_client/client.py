@@ -1,4 +1,3 @@
-import asyncio
 import json
 import logging
 
@@ -44,9 +43,5 @@ class MCPClient:
                         items.append(content.text)
                 return items
 
-    def call_tool_sync(self, tool_name: str, arguments: dict) -> list:
-        try:
-            return asyncio.run(self._call(tool_name, arguments))
-        except Exception:
-            logger.exception("MCP tool call failed: %s", tool_name)
-            return []
+    async def call_tool(self, tool_name: str, arguments: dict) -> list:
+        return await self._call(tool_name, arguments)

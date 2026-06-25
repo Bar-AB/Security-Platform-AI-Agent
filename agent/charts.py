@@ -1,7 +1,6 @@
+import base64
+import io
 import logging
-import os
-import subprocess
-import sys
 
 import matplotlib
 
@@ -25,12 +24,10 @@ class SecurityCharts:
         ax.set_title("Issue Severity Distribution")
         ax.set_ylabel("Count")
         plt.tight_layout()
-        return self._save_fig(fig, "severity_distribution.png")
+        return self._fig_to_base64(fig)
 
     def top_vulnerable_apps(self, applications: list[dict]) -> str:
-        apps = sorted(applications, key=lambda a: a.get("risk_score", 0), reverse=True)[
-            :5
-        ]
+        apps = sorted(applications, key=lambda a: a.get("risk_score", 0), reverse=True)[:5]
         names = [a["name"] for a in apps]
         scores = [a["risk_score"] for a in apps]
 
@@ -40,23 +37,12 @@ class SecurityCharts:
         ax.set_xlabel("Risk Score")
         ax.set_title("Top Vulnerable Applications")
         plt.tight_layout()
-        return self._save_fig(fig, "top_vulnerable_apps.png")
-
-    def _save_fig(self, fig: plt.Figure, filename: str) -> str:
-        fig.savefig(filename, dpi=100, bbox_inches="tight")
-        plt.close(fig)
-        self._open_file(filename)
-        return filename
+        return self._fig_to_base64(fig)
 
     @staticmethod
-    def _open_file(filename: str) -> None:
-        # Best-effort open in the OS default viewer; a headless environment just keeps the PNG.
-        try:
-            if sys.platform == "win32":
-                os.startfile(filename)  # type: ignore[attr-defined]  # Windows-only API
-            elif sys.platform == "darwin":
-                subprocess.run(["open", filename], check=False)
-            else:
-                subprocess.run(["xdg-open", filename], check=False)
-        except (OSError, FileNotFoundError):
-            logger.debug("Could not open chart file %s", filename, exc_info=True)
+    def _fig_to_base64(fig: plt.Figure) -> str:
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", dpi=100, bbox_inches="tight")
+        plt.close(fig)
+        buf.seek(0)
+        return base64.b64encode(buf.read()).decode()

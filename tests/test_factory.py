@@ -13,7 +13,7 @@ class TestAgentFactory:
     def test_build_returns_compiled_graph(self):
         with (
             patch.object(_factory_module, "RAGIndexer") as mock_idx,
-            patch.object(_factory_module, "RAGRetriever"),
+            patch.object(_factory_module, "MultiQueryRAGRetriever"),
             patch.object(_factory_module, "MCPClient"),
             patch.object(_factory_module, "SecurityMCPTools"),
             patch.object(_factory_module, "ChatOpenAI"),
@@ -28,7 +28,7 @@ class TestAgentFactory:
     def test_build_triggers_indexing_when_not_indexed(self):
         with (
             patch.object(_factory_module, "RAGIndexer") as mock_idx,
-            patch.object(_factory_module, "RAGRetriever"),
+            patch.object(_factory_module, "MultiQueryRAGRetriever"),
             patch.object(_factory_module, "MCPClient"),
             patch.object(_factory_module, "SecurityMCPTools"),
             patch.object(_factory_module, "ChatOpenAI"),
@@ -41,7 +41,7 @@ class TestAgentFactory:
     def test_build_raises_when_indexing_fails(self):
         with (
             patch.object(_factory_module, "RAGIndexer") as mock_idx,
-            patch.object(_factory_module, "RAGRetriever"),
+            patch.object(_factory_module, "MultiQueryRAGRetriever"),
             patch.object(_factory_module, "MCPClient"),
             patch.object(_factory_module, "SecurityMCPTools"),
             patch.object(_factory_module, "ChatOpenAI"),
@@ -56,7 +56,7 @@ class TestAgentFactory:
         monkeypatch.setenv("RAG_DISTANCE_THRESHOLD", "0.3")
         with (
             patch.object(_factory_module, "RAGIndexer") as mock_idx,
-            patch.object(_factory_module, "RAGRetriever") as mock_retriever,
+            patch.object(_factory_module, "MultiQueryRAGRetriever") as mock_retriever,
             patch.object(_factory_module, "MCPClient"),
             patch.object(_factory_module, "SecurityMCPTools"),
             patch.object(_factory_module, "ChatOpenAI"),

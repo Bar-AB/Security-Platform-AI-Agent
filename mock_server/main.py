@@ -22,6 +22,7 @@ _mcp = FastMCP("security-platform")
 
 @_mcp.tool()
 def get_security_issues(
+    id: str | None = None,
     severity: str | None = None,
     category: str | None = None,
     status: str | None = None,
@@ -33,6 +34,7 @@ def get_security_issues(
     limit: int | None = None,
 ) -> list[dict]:
     """Get security issues. Filters:
+    - id: exact issue ID (e.g. 'ISS-001') — returns a single issue
     - severity: critical, high, medium, low
     - category: injection, xss, broken_auth, exposed_data, misconfig, dependency
     - status: open, in_progress, resolved
@@ -43,6 +45,8 @@ def get_security_issues(
     - discovered_before: ISO date (YYYY-MM-DD), returns issues discovered on or before this date
     - limit: max number of results to return"""
     issues = MOCK_ISSUES
+    if id:
+        issues = [i for i in issues if i.id.upper() == id.upper()]
     if severity:
         issues = [i for i in issues if i.severity.value == severity.lower()]
     if category:
@@ -86,6 +90,7 @@ def get_applications(
 
 @_mcp.tool()
 def get_pipeline_issues(
+    id: str | None = None,
     severity: str | None = None,
     pipeline: str | None = None,
     stage: str | None = None,
@@ -97,6 +102,7 @@ def get_pipeline_issues(
     limit: int | None = None,
 ) -> list[dict]:
     """Get CI/CD pipeline security findings. Filters:
+    - id: exact finding ID (e.g. 'PIPE-006') — returns a single finding
     - severity: critical, high, medium, low
     - pipeline: CI/CD pipeline name (e.g. 'auth-service-ci', 'payment-service-ci'); substring match
     - stage: pipeline stage name (e.g. 'sast', 'dependency-scan', 'secret-scan', 'container-scan', 'dast')
@@ -107,6 +113,8 @@ def get_pipeline_issues(
     - detected_before: ISO date (YYYY-MM-DD), returns findings detected on or before this date
     - limit: max number of results to return"""
     issues = MOCK_PIPELINE_ISSUES
+    if id:
+        issues = [i for i in issues if i.id.upper() == id.upper()]
     if severity:
         issues = [i for i in issues if i.severity.value == severity.lower()]
     if pipeline:

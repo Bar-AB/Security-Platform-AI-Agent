@@ -8,7 +8,7 @@ from agent.graph import GraphBuilder
 from mcp_client.client import MCPClient
 from mcp_client.tools import SecurityMCPTools
 from rag.indexer import RAGIndexer
-from rag.retriever import RAGRetriever
+from rag.retriever import MultiQueryRAGRetriever
 
 logger = logging.getLogger(__name__)
 
@@ -38,10 +38,15 @@ class AgentFactory:
 
         top_k = int(os.getenv("RAG_TOP_K", "5"))
         distance_threshold = float(os.getenv("RAG_DISTANCE_THRESHOLD", "0.5"))
-        retriever = RAGRetriever(persist_dir=chroma_dir, k=top_k, distance_threshold=distance_threshold)
         mcp_client = MCPClient(url=mcp_url, token=mcp_token)
         mcp_tools = SecurityMCPTools(client=mcp_client)
         llm = ChatOpenAI(model=model, temperature=0, max_retries=3)
+        retriever = MultiQueryRAGRetriever(
+            persist_dir=chroma_dir,
+            llm=llm,
+            k=top_k,
+            distance_threshold=distance_threshold,
+        )
 
         builder = GraphBuilder(llm=llm, mcp_tools=mcp_tools, retriever=retriever)
         return builder.build(with_memory=True)
