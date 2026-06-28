@@ -8,6 +8,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
 from agent.charts import SecurityCharts
+from agent.guardrails import InputGuardrail
 from agent.prompts import CLASSIFIER_PROMPT, FORMATTER_PROMPT, VALIDATOR_PROMPT
 from agent.state import AgentState, GroundednessResult, QueryClassification
 from mcp_client.tools import SecurityMCPTools
@@ -28,10 +29,26 @@ class AgentNodes:
         self._retriever = retriever
         self._formatter = FORMATTER_PROMPT | llm
         self._charts = SecurityCharts()
+        self._guardrail = InputGuardrail()
 
     def classify_query(self, state: AgentState) -> dict:
         messages = state["messages"]
         query = cast(str, messages[-1].content)
+
+        guard = self._guardrail.check(query)
+        if guard.blocked:
+            safe_msg = guard.safe_message
+            return {
+                **self._fresh_results("mixed"),
+                "query_type": "blocked",
+                "docs_query": "",
+                "standalone_query": "",
+                "wants_chart": False,
+                "group_by_field": None,
+                "final_response": safe_msg,
+                "messages": [AIMessage(content=safe_msg)],
+            }
+
         history = self._format_history(messages)
         wants_chart = any(kw in query.lower() for kw in self._CHART_KEYWORDS)
         try:

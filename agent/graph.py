@@ -49,6 +49,8 @@ class GraphBuilder:
 
     def _route_after_classify(self, state: AgentState) -> str | list[str]:
         qtype = state["query_type"]
+        if qtype == "blocked":
+            return END
         if qtype == "chart":
             return "chart_node"
         if qtype == "data":
