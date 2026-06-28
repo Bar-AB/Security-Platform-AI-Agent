@@ -132,6 +132,25 @@ AZURE_OPENAI_DEPLOYMENT=...
 
 ---
 
+## Security
+
+The agent implements three-layer prompt injection defense. Full details: [`docs/prompt-injection-defense.md`](docs/prompt-injection-defense.md).
+
+### Summary
+
+| Layer | Location | What it defends |
+|---|---|---|
+| `InputGuardrail` | `agent/guardrails.py` | Direct injection — pattern-blocks 19 known injection phrases before any LLM call; logs warnings |
+| XML delimiter isolation | `agent/prompts.py` | Indirect injection — wraps `{mcp_result}`, `{rag_result}`, `{context}`, `{history}` in named XML tags with `SECURITY BOUNDARY` instructions |
+| Tag breakout sanitization | `agent/guardrails.py` → `agent/nodes.py` | Prevents `</mcp_data>` etc. in tool/doc output from escaping delimiter boundaries |
+
+### Rules
+- Blocked queries (`query_type = "blocked"`) exit the graph before any LLM call — never reach MCP or RAG nodes
+- Every blocked attempt is logged at `WARNING` with matched pattern + query excerpt
+- Do not add new prompt template variables that accept external data without wrapping them in named XML tags and calling `sanitize_for_xml_context`
+
+---
+
 ## Developer Context
 
 Built by Bar Abulher as a portfolio project. Background: 18 months backend/AI engineering at a cybersecurity startup — shipped RAG pipelines, SIEM integrations, enrichment modules. This project intentionally mirrors real production patterns from that experience.
