@@ -8,7 +8,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
 from agent.charts import SecurityCharts
-from agent.guardrails import InputGuardrail
+from agent.guardrails import InputGuardrail, sanitize_for_xml_context
 from agent.prompts import CLASSIFIER_PROMPT, FORMATTER_PROMPT, VALIDATOR_PROMPT
 from agent.state import AgentState, GroundednessResult, QueryClassification
 from mcp_client.tools import SecurityMCPTools
@@ -375,8 +375,8 @@ class AgentNodes:
             response = self._formatter.invoke(
                 {
                     "query": query,
-                    "mcp_result": mcp_result,
-                    "rag_result": rag_result,
+                    "mcp_result": sanitize_for_xml_context(mcp_result, "mcp_data"),
+                    "rag_result": sanitize_for_xml_context(rag_result, "rag_data"),
                 }
             )
             sources_footer = self._build_sources_footer(rag_result)
@@ -496,7 +496,10 @@ class AgentNodes:
         if not response:
             return {"validation_score": 1.0, "validation_flagged": False}
 
-        context = f"MCP Data:\n{mcp_result}\n\nDocumentation:\n{rag_result}"
+        context = (
+            f"MCP Data:\n{sanitize_for_xml_context(mcp_result, 'context')}\n\n"
+            f"Documentation:\n{sanitize_for_xml_context(rag_result, 'context')}"
+        )
         try:
             validator = self._llm.with_structured_output(GroundednessResult)
             result = cast(

@@ -347,3 +347,10 @@ class TestPromptHardening:
         system_msg = CLASSIFIER_PROMPT.messages[0].prompt.template
         assert "SECURITY" in system_msg
         assert "CONVERSATION HISTORY" in system_msg
+
+    def test_classifier_prompt_wraps_history_in_xml(self):
+        from agent.prompts import CLASSIFIER_PROMPT
+        system_msg = CLASSIFIER_PROMPT.messages[0].prompt.template
+        assert "<history>" in system_msg
+        assert "</history>" in system_msg
+        assert "{history}" in system_msg
