@@ -26,7 +26,7 @@ class InputGuardrail:
     _INJECTION_PATTERNS: tuple[re.Pattern, ...] = tuple(
         re.compile(p, re.IGNORECASE)
         for p in [
-            r"ignore\s+(previous|all|prior|above)\s+instructions?",
+            r"ignore\s+(the\s+)?(previous|all|prior|above)\s+instructions?",
             r"disregard\s+(the\s+)?(above|previous|prior|all)",
             r"forget\s+(your\s+)?(instructions?|training|rules?|guidelines?)",
             r"you\s+are\s+now\s+(a|an)\b",
