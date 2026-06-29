@@ -1,13 +1,17 @@
 import asyncio
+import pydantic
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+from langchain_core.documents import Document
 from langchain_core.messages import AIMessage, HumanMessage
+
+from agent.graph import GraphBuilder
+from agent.nodes import AgentNodes
+from agent.state import AgentState, GroundednessResult, QueryClassification
 
 
 class TestAgentStateAndClassification:
     def test_query_classification_accepts_chart_type(self):
-        from agent.state import QueryClassification
-
         qc = QueryClassification(
             query_type="chart",
             reasoning="follow-up",
@@ -17,9 +21,6 @@ class TestAgentStateAndClassification:
         assert qc.query_type == "chart"
 
     def test_agent_state_accepts_wants_chart(self):
-        from agent.state import AgentState
-        from langchain_core.messages import HumanMessage
-
         state: AgentState = {
             "messages": [HumanMessage("test")],
             "query_type": "data",
@@ -35,9 +36,6 @@ class TestAgentStateAndClassification:
 class TestClassifyQueryChartDetection:
     @pytest.fixture
     def nodes(self):
-        from agent.nodes import AgentNodes
-        from agent.state import QueryClassification
-
         llm = MagicMock()
         classification = QueryClassification(
             query_type="data",
@@ -49,8 +47,6 @@ class TestClassifyQueryChartDetection:
         return AgentNodes(llm=llm, mcp_tools=MagicMock(), retriever=MagicMock())
 
     def _make_state(self, query: str):
-        from agent.state import AgentState
-
         return AgentState(
             {
                 "messages": [HumanMessage(query)],
@@ -100,13 +96,9 @@ class TestClassifyQueryChartDetection:
 class TestClassifyQuery:
     @pytest.fixture
     def mock_llm(self):
-        llm = MagicMock()
-        return llm
+        return MagicMock()
 
     def test_classify_data_query(self, mock_llm):
-        from agent.state import AgentState, QueryClassification
-        from agent.nodes import AgentNodes
-
         classification = QueryClassification(
             query_type="data",
             reasoning="asks for issue data",
@@ -130,9 +122,6 @@ class TestClassifyQuery:
         assert result["standalone_query"] == "show me critical issues"
 
     def test_classify_doc_query(self, mock_llm):
-        from agent.state import AgentState, QueryClassification
-        from agent.nodes import AgentNodes
-
         classification = QueryClassification(
             query_type="doc",
             reasoning="asks about docs",
@@ -157,9 +146,6 @@ class TestClassifyQuery:
 
     def test_data_query_resets_stale_rag_result(self, mock_llm):
         # Regression: a data follow-up after a doc turn must not inherit the prior rag_result.
-        from agent.state import AgentState, QueryClassification
-        from agent.nodes import AgentNodes
-
         classification = QueryClassification(
             query_type="data",
             reasoning="asks for issue data",
@@ -184,9 +170,6 @@ class TestClassifyQuery:
 
     def test_chart_query_preserves_prior_mcp_result(self, mock_llm):
         # The "chart" route reuses the previous turn's mcp_result, so classify must not clear it.
-        from agent.state import AgentState, QueryClassification
-        from agent.nodes import AgentNodes
-
         classification = QueryClassification(
             query_type="chart",
             reasoning="wants a chart of prior results",
@@ -214,19 +197,13 @@ class TestClassifyQuery:
 class TestFormatHistory:
     @pytest.fixture
     def nodes(self):
-        from agent.nodes import AgentNodes
-
         return AgentNodes(llm=MagicMock(), mcp_tools=MagicMock(), retriever=MagicMock())
 
     def test_no_prior_messages_returns_placeholder(self, nodes):
-        from langchain_core.messages import HumanMessage
-
         history = nodes._format_history([HumanMessage("only the current message")])
         assert history == "(no prior conversation)"
 
     def test_includes_prior_user_and_assistant_turns(self, nodes):
-        from langchain_core.messages import AIMessage, HumanMessage
-
         messages = [
             HumanMessage("How do I connect to GitHub?"),
             AIMessage("Use the GitHub connector under Settings."),
@@ -239,8 +216,6 @@ class TestFormatHistory:
         assert "What are the steps?" not in history
 
     def test_truncates_long_message_content(self, nodes):
-        from langchain_core.messages import AIMessage, HumanMessage
-
         long_answer = "x" * 1000
         messages = [
             HumanMessage("question"),
@@ -263,14 +238,9 @@ class TestMCPNode:
         )
         mcp_tools.get_applications = AsyncMock(return_value="[]")
         mcp_tools.get_pipeline_issues = AsyncMock(return_value="[]")
-        retriever = MagicMock()
-        from agent.nodes import AgentNodes
-
-        return AgentNodes(llm=llm, mcp_tools=mcp_tools, retriever=retriever)
+        return AgentNodes(llm=llm, mcp_tools=mcp_tools, retriever=MagicMock())
 
     def test_mcp_node_returns_mcp_result_key(self, nodes):
-        from agent.state import AgentState
-
         state: AgentState = {
             "messages": [HumanMessage("show me critical security issues")],
             "query_type": "data",
@@ -289,8 +259,6 @@ class TestMCPNode:
         assert "mcp_result" in result
 
     def test_mcp_node_handles_exception_gracefully(self, nodes):
-        from agent.state import AgentState
-
         state: AgentState = {
             "messages": [HumanMessage("show me issues")],
             "query_type": "data",
@@ -310,21 +278,15 @@ class TestRAGNode:
         llm = MagicMock()
         llm.with_structured_output.return_value.invoke.return_value = MagicMock()
         retriever = MagicMock()
-        from langchain_core.documents import Document
-
         retriever.retrieve.return_value = [
             Document(
                 page_content="Jira setup steps.", metadata={"source": "connectors.md"}
             )
         ]
         retriever.format_for_prompt.return_value = "[connectors.md]\nJira setup steps."
-        from agent.nodes import AgentNodes
-
         return AgentNodes(llm=llm, mcp_tools=MagicMock(), retriever=retriever)
 
     def test_rag_node_returns_rag_result_key(self, nodes):
-        from agent.state import AgentState
-
         state: AgentState = {
             "messages": [HumanMessage("how do I connect Jira?")],
             "query_type": "doc",
@@ -338,8 +300,6 @@ class TestRAGNode:
         nodes._retriever.retrieve.assert_called_once()
 
     def test_rag_node_handles_empty_results(self, nodes):
-        from agent.state import AgentState
-
         nodes._retriever.retrieve.return_value = []
         state: AgentState = {
             "messages": [HumanMessage("something obscure")],
@@ -361,13 +321,9 @@ class TestFormatResponse:
         llm.invoke.return_value = MagicMock(
             content="Here are the critical issues found."
         )
-        from agent.nodes import AgentNodes
-
         return AgentNodes(llm=llm, mcp_tools=MagicMock(), retriever=MagicMock())
 
     def test_format_response_sets_final_response(self, nodes):
-        from agent.state import AgentState
-
         state: AgentState = {
             "messages": [HumanMessage("show me critical issues")],
             "query_type": "data",
@@ -380,8 +336,6 @@ class TestFormatResponse:
         assert result["final_response"]
 
     def test_format_response_handles_exception(self, nodes):
-        from agent.state import AgentState
-
         # Needs both mcp and rag context so neither the no-context guard nor the
         # deterministic MCP shortcut fires — forces the code path through the LLM formatter.
         nodes._formatter = MagicMock()
@@ -398,8 +352,6 @@ class TestFormatResponse:
         assert "Sorry" in result["final_response"]
 
     def test_format_response_returns_no_info_when_no_context(self, nodes):
-        from agent.state import AgentState
-
         state: AgentState = {
             "messages": [HumanMessage("How do I configure a Kubernetes load balancer?")],
             "query_type": "doc",
@@ -415,13 +367,9 @@ class TestFormatResponse:
 class TestMCPNodeChartGuard:
     @pytest.fixture
     def nodes(self):
-        from agent.nodes import AgentNodes
-
         return AgentNodes(llm=MagicMock(), mcp_tools=MagicMock(), retriever=MagicMock())
 
     def _make_state(self, wants_chart: bool):
-        from agent.state import AgentState
-
         return AgentState(
             {
                 "messages": [HumanMessage("show me issues")],
@@ -468,13 +416,9 @@ class TestMCPNodeChartGuard:
 class TestChartNode:
     @pytest.fixture
     def nodes(self):
-        from agent.nodes import AgentNodes
-
         return AgentNodes(llm=MagicMock(), mcp_tools=MagicMock(), retriever=MagicMock())
 
     def _make_state(self, mcp_result: str):
-        from agent.state import AgentState
-
         return AgentState(
             {
                 "messages": [HumanMessage("show me on the chart")],
@@ -532,13 +476,9 @@ class TestChartNode:
 class TestValidateResponse:
     @pytest.fixture
     def nodes(self):
-        from agent.nodes import AgentNodes
-
         return AgentNodes(llm=MagicMock(), mcp_tools=MagicMock(), retriever=MagicMock())
 
     def _make_state(self, final_response: str, mcp_result: str = "N/A", rag_result: str = "N/A"):
-        from agent.state import AgentState
-
         # Mirrors real graph state: format_response._emit appends an AIMessage before
         # validate_response runs, so messages[-1] is always an AIMessage here.
         return AgentState(
@@ -560,8 +500,6 @@ class TestValidateResponse:
         nodes._llm.with_structured_output.assert_not_called()
 
     def test_grounded_response_passes_without_modification(self, nodes):
-        from agent.state import GroundednessResult
-
         grounded = GroundednessResult(
             score=0.95, is_grounded=True, flagged_claims=[], reasoning="All claims verified."
         )
@@ -576,8 +514,6 @@ class TestValidateResponse:
         assert "final_response" not in result  # response unchanged
 
     def test_ungrounded_response_appends_warning(self, nodes):
-        from agent.state import GroundednessResult
-
         ungrounded = GroundednessResult(
             score=0.4,
             is_grounded=False,
@@ -610,8 +546,6 @@ class TestValidateResponse:
     def test_warning_fires_when_score_low_despite_is_grounded_true(self, nodes):
         # Inconsistent LLM output: score says hallucinated, is_grounded says fine.
         # The code must trust score, not is_grounded, to catch this.
-        from agent.state import GroundednessResult
-
         inconsistent = GroundednessResult(
             score=0.2,
             is_grounded=True,
@@ -631,8 +565,6 @@ class TestValidateResponse:
     def test_flagged_response_updates_messages_history(self, nodes):
         # When validation flags a response, the AIMessage in messages must be updated
         # so conversation history stays consistent with what the user sees.
-        from agent.state import GroundednessResult
-
         ungrounded = GroundednessResult(
             score=0.3, is_grounded=False, flagged_claims=["fake CVE"], reasoning="not in data"
         )
@@ -643,7 +575,6 @@ class TestValidateResponse:
         )
         original_msg_id = state["messages"][-1].id
         result = nodes.validate_response(state)
-        # messages must be present and carry the warned text
         assert "messages" in result
         updated_msgs = result["messages"]
         assert len(updated_msgs) == 1
@@ -659,7 +590,6 @@ class TestValidateResponse:
             final_response="",
             mcp_result='[get_security_issues]\n[{"id":"ISS-001","severity":"critical"}]',
         )
-        # Overwrite the last AIMessage content to empty to match the state
         state["messages"][-1] = AIMessage(content="")
         result = nodes.validate_response(state)
         assert result["validation_score"] == 1.0
@@ -669,22 +599,14 @@ class TestValidateResponse:
 
 class TestGroundednessResultValidation:
     def test_score_above_one_raises_validation_error(self):
-        import pydantic
-        from agent.state import GroundednessResult
-
         with pytest.raises(pydantic.ValidationError):
             GroundednessResult(score=1.5, is_grounded=True, flagged_claims=[], reasoning="")
 
     def test_score_below_zero_raises_validation_error(self):
-        import pydantic
-        from agent.state import GroundednessResult
-
         with pytest.raises(pydantic.ValidationError):
             GroundednessResult(score=-0.1, is_grounded=False, flagged_claims=[], reasoning="")
 
     def test_score_at_boundary_values_accepted(self):
-        from agent.state import GroundednessResult
-
         low = GroundednessResult(score=0.0, is_grounded=False, flagged_claims=[], reasoning="r")
         high = GroundednessResult(score=1.0, is_grounded=True, flagged_claims=[], reasoning="r")
         assert low.score == 0.0
@@ -693,8 +615,6 @@ class TestGroundednessResultValidation:
 
 class TestGraphRouting:
     def test_graph_compiles(self):
-        from agent.graph import GraphBuilder
-
         builder = GraphBuilder(
             llm=MagicMock(),
             mcp_tools=MagicMock(),
@@ -704,9 +624,6 @@ class TestGraphRouting:
         assert app is not None
 
     def test_graph_routes_data_to_mcp(self):
-        from agent.graph import GraphBuilder
-        from agent.state import AgentState
-
         builder = GraphBuilder(
             llm=MagicMock(),
             mcp_tools=MagicMock(),
@@ -722,9 +639,6 @@ class TestGraphRouting:
         assert builder._route_after_classify(state) == "mcp_node"
 
     def test_graph_routes_doc_to_rag(self):
-        from agent.graph import GraphBuilder
-        from agent.state import AgentState
-
         builder = GraphBuilder(
             llm=MagicMock(),
             mcp_tools=MagicMock(),
@@ -740,9 +654,6 @@ class TestGraphRouting:
         assert builder._route_after_classify(state) == "rag_node"
 
     def test_graph_routes_chart_to_chart_node(self):
-        from agent.graph import GraphBuilder
-        from agent.state import AgentState
-
         builder = GraphBuilder(
             llm=MagicMock(),
             mcp_tools=MagicMock(),
@@ -759,8 +670,6 @@ class TestGraphRouting:
         assert builder._route_after_classify(state) == "chart_node"
 
     def test_graph_compiles_with_chart_and_validate_nodes(self):
-        from agent.graph import GraphBuilder
-
         builder = GraphBuilder(
             llm=MagicMock(),
             mcp_tools=MagicMock(),
@@ -774,10 +683,6 @@ class TestGraphRouting:
 
     def test_chart_path_bypasses_validate_response(self):
         # Invoke the chart path end-to-end and confirm validate_response is never called.
-        from agent.graph import GraphBuilder
-        from agent.state import AgentState
-        from langchain_core.messages import AIMessage, HumanMessage
-
         builder = GraphBuilder(llm=MagicMock(), mcp_tools=MagicMock(), retriever=MagicMock())
         validate_mock = MagicMock(return_value={})
         with (
@@ -801,10 +706,6 @@ class TestGraphRouting:
 
     def test_format_response_connects_to_validate_response(self):
         # Invoke the data path and confirm validate_response is called exactly once.
-        from agent.graph import GraphBuilder
-        from agent.state import AgentState
-        from langchain_core.messages import AIMessage, HumanMessage
-
         builder = GraphBuilder(llm=MagicMock(), mcp_tools=MagicMock(), retriever=MagicMock())
         validate_mock = MagicMock(return_value={"validation_score": 1.0, "validation_flagged": False})
         with (
@@ -830,9 +731,6 @@ class TestGraphRouting:
         validate_mock.assert_called_once()
 
     def test_graph_routes_mixed_mcp_then_rag(self):
-        from agent.graph import GraphBuilder
-        from agent.state import AgentState
-
         builder = GraphBuilder(
             llm=MagicMock(),
             mcp_tools=MagicMock(),

@@ -1,6 +1,8 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
+from mcp_client.tools import SecurityMCPTools
+
 
 class TestSecurityMCPTools:
     @pytest.fixture
@@ -22,15 +24,11 @@ class TestSecurityMCPTools:
         return client
 
     def test_tool_names(self, mock_client):
-        from mcp_client.tools import SecurityMCPTools
-
         tool_names = [t.name for t in SecurityMCPTools(client=mock_client).as_langchain_tools()]
         assert tool_names == ["get_security_issues", "get_applications", "get_pipeline_issues"]
 
     @pytest.mark.asyncio
     async def test_get_security_issues_calls_client(self, mock_client):
-        from mcp_client.tools import SecurityMCPTools
-
         tools_obj = SecurityMCPTools(client=mock_client)
         result = await tools_obj.get_security_issues(severity="critical")
         mock_client.call_tool.assert_called_once_with(
@@ -52,23 +50,17 @@ class TestSecurityMCPTools:
 
     @pytest.mark.asyncio
     async def test_get_security_issues_returns_string(self, mock_client):
-        from mcp_client.tools import SecurityMCPTools
-
         result = await SecurityMCPTools(client=mock_client).get_security_issues()
         assert isinstance(result, str)
 
     @pytest.mark.asyncio
     async def test_get_security_issues_empty_returns_message(self, mock_client):
-        from mcp_client.tools import SecurityMCPTools
-
         mock_client.call_tool = AsyncMock(return_value=[])
         result = await SecurityMCPTools(client=mock_client).get_security_issues()
         assert result == "[]"
 
     @pytest.mark.asyncio
     async def test_get_pipeline_issues_calls_client(self, mock_client):
-        from mcp_client.tools import SecurityMCPTools
-
         mock_client.call_tool = AsyncMock(return_value=[{"id": "PIPE-001", "title": "Log4j"}])
         tools_obj = SecurityMCPTools(client=mock_client)
         result = await tools_obj.get_pipeline_issues(severity="critical")
@@ -91,8 +83,6 @@ class TestSecurityMCPTools:
 
     @pytest.mark.asyncio
     async def test_get_applications_calls_client(self, mock_client):
-        from mcp_client.tools import SecurityMCPTools
-
         mock_client.call_tool = AsyncMock(return_value=[{"id": "APP-001", "name": "payment-service", "risk_score": 9.1}])
         result = await SecurityMCPTools(client=mock_client).get_applications(limit=3)
         mock_client.call_tool.assert_called_once_with(

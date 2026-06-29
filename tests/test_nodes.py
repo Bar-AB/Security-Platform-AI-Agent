@@ -1,7 +1,11 @@
 import json
 import pytest
 from unittest.mock import MagicMock
-from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.messages import AIMessage, HumanMessage
+
+from agent.nodes import AgentNodes
+from agent.prompts import CLASSIFIER_PROMPT, FORMATTER_PROMPT, VALIDATOR_PROMPT
+from agent.state import GroundednessResult, QueryClassification
 
 
 class TestClassifyQuery:
@@ -11,7 +15,6 @@ class TestClassifyQuery:
 
     @pytest.fixture
     def nodes(self, llm):
-        from agent.nodes import AgentNodes
         return AgentNodes(
             llm=llm,
             mcp_tools=MagicMock(),
@@ -22,7 +25,6 @@ class TestClassifyQuery:
         return {"messages": [HumanMessage(content=query)]}
 
     def test_data_query_routes_to_data(self, nodes, llm):
-        from agent.state import QueryClassification
         query = "show critical issues"
         llm.with_structured_output.return_value.invoke.return_value = QueryClassification(
             query_type="data",
@@ -34,7 +36,6 @@ class TestClassifyQuery:
         assert result["query_type"] == "data"
 
     def test_doc_query_routes_to_doc(self, nodes, llm):
-        from agent.state import QueryClassification
         query = "How do I connect to GitHub?"
         llm.with_structured_output.return_value.invoke.return_value = QueryClassification(
             query_type="doc",
@@ -46,7 +47,6 @@ class TestClassifyQuery:
         assert result["query_type"] == "doc"
 
     def test_mixed_query_routes_to_mixed(self, nodes, llm):
-        from agent.state import QueryClassification
         query = "What is SQL injection and how many do we have?"
         llm.with_structured_output.return_value.invoke.return_value = QueryClassification(
             query_type="mixed",
@@ -63,7 +63,6 @@ class TestClassifyQuery:
         assert result["query_type"] == "mixed"
 
     def test_standalone_query_stored(self, nodes, llm):
-        from agent.state import QueryClassification
         query = "and the high ones?"
         resolved = "Show me the high severity issues"
         llm.with_structured_output.return_value.invoke.return_value = QueryClassification(
@@ -76,7 +75,6 @@ class TestClassifyQuery:
         assert result["standalone_query"] == resolved
 
     def test_chart_override_when_data_entities_present(self, nodes, llm):
-        from agent.state import QueryClassification
         # LLM returns "chart" but query contains data entities → override to "data"
         query = "show me the issues as a chart"
         llm.with_structured_output.return_value.invoke.return_value = QueryClassification(
@@ -104,7 +102,6 @@ class TestClassifyQuery:
         llm.with_structured_output.assert_not_called()
 
     def test_legitimate_security_query_is_not_blocked(self, nodes, llm):
-        from agent.state import QueryClassification
         query = "show me critical issues"
         llm.with_structured_output.return_value.invoke.return_value = QueryClassification(
             query_type="data",
@@ -117,7 +114,6 @@ class TestClassifyQuery:
         llm.with_structured_output.assert_called_once()
 
     def test_injection_query_mentions_category_is_not_blocked(self, nodes, llm):
-        from agent.state import QueryClassification
         query = "How many SQL injection issues do we have?"
         llm.with_structured_output.return_value.invoke.return_value = QueryClassification(
             query_type="mixed",
@@ -136,7 +132,6 @@ class TestValidateResponse:
 
     @pytest.fixture
     def nodes(self, llm):
-        from agent.nodes import AgentNodes
         return AgentNodes(
             llm=llm,
             mcp_tools=MagicMock(),
@@ -158,7 +153,6 @@ class TestValidateResponse:
         assert result["validation_flagged"] is False
 
     def test_passes_when_score_above_threshold(self, nodes, llm):
-        from agent.state import GroundednessResult
         llm.with_structured_output.return_value.invoke.return_value = GroundednessResult(
             score=0.95,
             is_grounded=True,
@@ -171,7 +165,6 @@ class TestValidateResponse:
         assert result["validation_score"] == pytest.approx(0.95)
 
     def test_flags_when_score_below_threshold(self, nodes, llm):
-        from agent.state import GroundednessResult
         llm.with_structured_output.return_value.invoke.return_value = GroundednessResult(
             score=0.4,
             is_grounded=False,
@@ -184,7 +177,6 @@ class TestValidateResponse:
         assert "Validation warning" in result["final_response"]
 
     def test_flags_when_is_grounded_false_despite_score(self, nodes, llm):
-        from agent.state import GroundednessResult
         # Score says OK but is_grounded=False — should still flag
         llm.with_structured_output.return_value.invoke.return_value = GroundednessResult(
             score=0.8,
@@ -207,7 +199,6 @@ class TestValidateResponse:
 class TestCountByField:
     @pytest.fixture
     def nodes(self):
-        from agent.nodes import AgentNodes
         return AgentNodes(llm=MagicMock(), mcp_tools=MagicMock(), retriever=MagicMock())
 
     def _make_mcp_result(self, issues: list[dict], pipeline: list[dict]) -> str:
@@ -277,7 +268,6 @@ class TestCountByField:
 class TestDetectGroupBy:
     @pytest.fixture
     def nodes(self):
-        from agent.nodes import AgentNodes
         return AgentNodes(llm=MagicMock(), mcp_tools=MagicMock(), retriever=MagicMock())
 
     def test_detects_by_severity(self, nodes):
@@ -312,44 +302,37 @@ class TestPromptHardening:
     """Verify prompts wrap untrusted data in XML tags and carry SECURITY BOUNDARY instructions."""
 
     def test_formatter_prompt_has_security_boundary(self):
-        from agent.prompts import FORMATTER_PROMPT
         system_msg = FORMATTER_PROMPT.messages[0].prompt.template
         assert "SECURITY BOUNDARY" in system_msg
 
     def test_formatter_prompt_wraps_mcp_result_in_xml(self):
-        from agent.prompts import FORMATTER_PROMPT
         system_msg = FORMATTER_PROMPT.messages[0].prompt.template
         assert "<mcp_data>" in system_msg
         assert "</mcp_data>" in system_msg
         assert "{mcp_result}" in system_msg
 
     def test_formatter_prompt_wraps_rag_result_in_xml(self):
-        from agent.prompts import FORMATTER_PROMPT
         system_msg = FORMATTER_PROMPT.messages[0].prompt.template
         assert "<rag_data>" in system_msg
         assert "</rag_data>" in system_msg
         assert "{rag_result}" in system_msg
 
     def test_validator_prompt_has_security_boundary(self):
-        from agent.prompts import VALIDATOR_PROMPT
         system_msg = VALIDATOR_PROMPT.messages[0].prompt.template
         assert "SECURITY BOUNDARY" in system_msg
 
     def test_validator_prompt_wraps_context_in_xml(self):
-        from agent.prompts import VALIDATOR_PROMPT
         system_msg = VALIDATOR_PROMPT.messages[0].prompt.template
         assert "<context>" in system_msg
         assert "</context>" in system_msg
         assert "{context}" in system_msg
 
     def test_classifier_prompt_has_security_note_for_history(self):
-        from agent.prompts import CLASSIFIER_PROMPT
         system_msg = CLASSIFIER_PROMPT.messages[0].prompt.template
         assert "SECURITY" in system_msg
         assert "CONVERSATION HISTORY" in system_msg
 
     def test_classifier_prompt_wraps_history_in_xml(self):
-        from agent.prompts import CLASSIFIER_PROMPT
         system_msg = CLASSIFIER_PROMPT.messages[0].prompt.template
         assert "<history>" in system_msg
         assert "</history>" in system_msg

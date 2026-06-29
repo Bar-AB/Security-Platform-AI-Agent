@@ -10,18 +10,6 @@ class GuardrailResult:
     safe_message: str = "I can't process that request."
 
 
-def sanitize_for_xml_context(text: str, *tag_names: str) -> str:
-    """Neutralize XML closing tags to prevent tag-breakout in prompt templates.
-
-    Replaces '</tag>' with '&lt;/tag&gt;' for each named tag, so injected closing
-    sequences can't escape the delimiter that bounds untrusted data.
-    """
-    result = text
-    for tag in tag_names:
-        result = result.replace(f"</{tag}>", f"&lt;/{tag}&gt;")
-    return result
-
-
 class InputGuardrail:
     _INJECTION_PATTERNS: tuple[re.Pattern, ...] = tuple(
         re.compile(p, re.IGNORECASE)
@@ -61,3 +49,15 @@ class InputGuardrail:
                 )
                 return GuardrailResult(blocked=True, matched_pattern=pattern.pattern)
         return GuardrailResult(blocked=False)
+
+    @staticmethod
+    def sanitize_for_xml_context(text: str, *tag_names: str) -> str:
+        """Neutralize XML closing tags to prevent tag-breakout in prompt templates.
+
+        Replaces '</tag>' with '&lt;/tag&gt;' for each named tag, so injected closing
+        sequences can't escape the delimiter that bounds untrusted data.
+        """
+        result = text
+        for tag in tag_names:
+            result = result.replace(f"</{tag}>", f"&lt;/{tag}&gt;")
+        return result

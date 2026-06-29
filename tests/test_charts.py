@@ -2,11 +2,12 @@ import base64
 import pytest
 from unittest.mock import patch
 
+from agent.charts import SecurityCharts
+
 
 class TestSecurityCharts:
     @pytest.fixture
     def charts(self):
-        from agent.charts import SecurityCharts
         return SecurityCharts()
 
     def test_severity_distribution_returns_base64(self, charts):

@@ -147,7 +147,7 @@ The agent implements three-layer prompt injection defense. Full details: [`docs/
 ### Rules
 - Blocked queries (`query_type = "blocked"`) exit the graph before any LLM call — never reach MCP or RAG nodes
 - Every blocked attempt is logged at `WARNING` with matched pattern + query excerpt
-- Do not add new prompt template variables that accept external data without wrapping them in named XML tags and calling `sanitize_for_xml_context`
+- Do not add new prompt template variables that accept external data without wrapping them in named XML tags and calling `InputGuardrail.sanitize_for_xml_context`
 
 ---
 

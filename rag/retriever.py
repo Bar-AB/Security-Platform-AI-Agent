@@ -79,7 +79,6 @@ class RAGRetriever:
         return docs
 
 
-
 _MULTI_QUERY_PROMPT = (
     "Generate 3 alternative phrasings of the following search query for a security platform "
     "documentation knowledge base. Each phrasing should capture the same intent from a "

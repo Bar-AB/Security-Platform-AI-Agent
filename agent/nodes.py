@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+from collections import defaultdict
 from datetime import date
 from typing import cast
 
@@ -8,7 +9,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
 from agent.charts import SecurityCharts
-from agent.guardrails import InputGuardrail, sanitize_for_xml_context
+from agent.guardrails import InputGuardrail
 from agent.prompts import CLASSIFIER_PROMPT, FORMATTER_PROMPT, VALIDATOR_PROMPT
 from agent.state import AgentState, GroundednessResult, QueryClassification
 from mcp_client.tools import SecurityMCPTools
@@ -302,7 +303,6 @@ class AgentNodes:
 
     @staticmethod
     def _count_by_field(mcp_result: str, field: str) -> str | None:
-        from collections import defaultdict
         counts: dict[str, list[str]] = defaultdict(list)
         try:
             for chunk in mcp_result.split("\n\n"):
@@ -375,8 +375,8 @@ class AgentNodes:
             response = self._formatter.invoke(
                 {
                     "query": query,
-                    "mcp_result": sanitize_for_xml_context(mcp_result, "mcp_data"),
-                    "rag_result": sanitize_for_xml_context(rag_result, "rag_data"),
+                    "mcp_result": InputGuardrail.sanitize_for_xml_context(mcp_result, "mcp_data"),
+                    "rag_result": InputGuardrail.sanitize_for_xml_context(rag_result, "rag_data"),
                 }
             )
             sources_footer = self._build_sources_footer(rag_result)
@@ -497,8 +497,8 @@ class AgentNodes:
             return {"validation_score": 1.0, "validation_flagged": False}
 
         context = (
-            f"MCP Data:\n{sanitize_for_xml_context(mcp_result, 'context')}\n\n"
-            f"Documentation:\n{sanitize_for_xml_context(rag_result, 'context')}"
+            f"MCP Data:\n{InputGuardrail.sanitize_for_xml_context(mcp_result, 'context')}\n\n"
+            f"Documentation:\n{InputGuardrail.sanitize_for_xml_context(rag_result, 'context')}"
         )
         try:
             validator = self._llm.with_structured_output(GroundednessResult)

@@ -1,9 +1,9 @@
 import logging
 
 from mcp.server.fastmcp import FastMCP
-from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
 
 from mock_server.data import MOCK_APPLICATIONS, MOCK_ISSUES, MOCK_PIPELINE_ISSUES
 from mock_server.models import Severity
@@ -146,7 +146,7 @@ def get_pipeline_issues(
 
 
 class _HealthMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         if request.url.path != "/health":
             return await call_next(request)
         data_ok = bool(MOCK_ISSUES) and bool(MOCK_APPLICATIONS) and bool(MOCK_PIPELINE_ISSUES)

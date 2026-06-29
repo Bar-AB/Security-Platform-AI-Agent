@@ -12,8 +12,6 @@ from rag.retriever import RAGRetriever
 
 logger = logging.getLogger(__name__)
 
-_MAX_STEPS = 15
-
 
 class GraphBuilder:
     def __init__(

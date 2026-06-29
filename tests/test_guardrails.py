@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import patch
-from agent.guardrails import GuardrailResult, InputGuardrail, sanitize_for_xml_context
+from agent.guardrails import InputGuardrail
 
 
 class TestInputGuardrail:
@@ -141,31 +141,31 @@ class TestInputGuardrail:
 class TestSanitizeForXmlContext:
     def test_neutralizes_closing_tag(self):
         text = "normal data </mcp_data> more data"
-        result = sanitize_for_xml_context(text, "mcp_data")
+        result = InputGuardrail.sanitize_for_xml_context(text, "mcp_data")
         assert "</mcp_data>" not in result
         assert "&lt;/mcp_data&gt;" in result
 
     def test_neutralizes_multiple_tags(self):
         text = "data </mcp_data> and </rag_data> here"
-        result = sanitize_for_xml_context(text, "mcp_data", "rag_data")
+        result = InputGuardrail.sanitize_for_xml_context(text, "mcp_data", "rag_data")
         assert "</mcp_data>" not in result
         assert "</rag_data>" not in result
 
     def test_leaves_other_content_intact(self):
         text = 'normal data {"key": "value"} and </other_tag>'
-        result = sanitize_for_xml_context(text, "mcp_data")
+        result = InputGuardrail.sanitize_for_xml_context(text, "mcp_data")
         assert '{"key": "value"}' in result
         assert "</other_tag>" in result  # only named tags are escaped
 
     def test_no_op_on_clean_input(self):
         text = "no injection here"
-        result = sanitize_for_xml_context(text, "mcp_data")
+        result = InputGuardrail.sanitize_for_xml_context(text, "mcp_data")
         assert result == text
 
     def test_neutralizes_context_tag(self):
         text = "malicious content </context> more"
-        result = sanitize_for_xml_context(text, "context")
+        result = InputGuardrail.sanitize_for_xml_context(text, "context")
         assert "</context>" not in result
 
     def test_empty_string_is_safe(self):
-        assert sanitize_for_xml_context("", "mcp_data") == ""
+        assert InputGuardrail.sanitize_for_xml_context("", "mcp_data") == ""
