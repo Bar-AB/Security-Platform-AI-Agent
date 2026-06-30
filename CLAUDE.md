@@ -134,7 +134,7 @@ AZURE_OPENAI_DEPLOYMENT=...
 
 ## Security
 
-The agent implements three-layer prompt injection defense. Full details: [`docs/prompt-injection-defense.md`](docs/prompt-injection-defense.md).
+The agent implements three-layer prompt injection defense. Full details: [`project-docs/temp/prompt-injection-defense.md`](project-docs/temp/prompt-injection-defense.md).
 
 ### Summary
 
