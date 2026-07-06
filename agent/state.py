@@ -7,10 +7,11 @@ from typing_extensions import NotRequired, TypedDict
 
 
 class QueryClassification(BaseModel):
-    query_type: Literal["data", "doc", "mixed", "chart"]
+    query_type: Literal["data", "doc", "mixed", "chart", "synthesis"]
     reasoning: str
     docs_query: str
     standalone_query: str
+    active_entities: list[str] = Field(default_factory=list)
 
 
 class GroundednessResult(BaseModel):
@@ -35,3 +36,4 @@ class AgentState(TypedDict):
     rag_chunks_returned: NotRequired[int]
     chart_image: NotRequired[str | None]
     group_by_field: NotRequired[str | None]
+    active_entities: NotRequired[list[str]]

@@ -194,6 +194,83 @@ class TestClassifyQuery:
         assert result["rag_result"] == "N/A"
 
 
+class TestEnforceMultiEntity:
+    @pytest.fixture
+    def nodes(self):
+        return AgentNodes(llm=MagicMock(), mcp_tools=MagicMock(), retriever=MagicMock())
+
+    def test_injects_missing_entity_when_comparison_keyword_present(self, nodes):
+        result = nodes._enforce_multi_entity(
+            standalone="Compare auth-service vulnerabilities",
+            raw_query="compare both",
+            new_entities=["auth-service"],
+            current_entities=["auth-service", "payment-service"],
+        )
+        assert "payment-service" in result
+
+    def test_no_injection_when_no_comparison_keyword(self, nodes):
+        result = nodes._enforce_multi_entity(
+            standalone="Show auth-service vulnerabilities",
+            raw_query="show auth-service issues",
+            new_entities=["auth-service"],
+            current_entities=["auth-service", "payment-service"],
+        )
+        assert result == "Show auth-service vulnerabilities"
+
+    def test_no_injection_when_entity_already_in_standalone(self, nodes):
+        result = nodes._enforce_multi_entity(
+            standalone="Compare auth-service and payment-service",
+            raw_query="compare both",
+            new_entities=["auth-service", "payment-service"],
+            current_entities=["auth-service", "payment-service"],
+        )
+        assert result == "Compare auth-service and payment-service"
+
+    def test_caps_injection_at_two_missing_entities(self, nodes):
+        result = nodes._enforce_multi_entity(
+            standalone="Compare auth-service issues",
+            raw_query="compare all of them",
+            new_entities=["auth-service"],
+            current_entities=["auth-service", "payment-service", "user-service", "api-gateway"],
+        )
+        # Only first 2 missing should be injected
+        assert "payment-service" in result
+        assert "user-service" in result
+        assert "api-gateway" not in result
+
+    def test_no_injection_when_current_entities_empty(self, nodes):
+        result = nodes._enforce_multi_entity(
+            standalone="Compare both",
+            raw_query="compare both",
+            new_entities=[],
+            current_entities=[],
+        )
+        assert result == "Compare both"
+
+    def test_classify_query_injects_missing_entity_on_compare_both(self, mock_llm=None):
+        # End-to-end: classifier collapses "compare both" to one entity; guard must inject the other.
+        mock_llm = MagicMock()
+        classification = QueryClassification(
+            query_type="data",
+            reasoning="comparison query",
+            docs_query="",
+            standalone_query="Compare auth-service vulnerabilities",
+            active_entities=["auth-service"],
+        )
+        mock_llm.with_structured_output.return_value.invoke.return_value = classification
+        nodes = AgentNodes(llm=mock_llm, mcp_tools=MagicMock(), retriever=MagicMock())
+        state: AgentState = {
+            "messages": [HumanMessage("compare both")],
+            "query_type": "",
+            "mcp_result": "N/A",
+            "rag_result": "N/A",
+            "final_response": "",
+            "active_entities": ["auth-service", "payment-service"],
+        }
+        result = nodes.classify_query(state)
+        assert "payment-service" in result["standalone_query"]
+
+
 class TestFormatHistory:
     @pytest.fixture
     def nodes(self):
@@ -225,6 +302,52 @@ class TestFormatHistory:
         history = nodes._format_history(messages)
         assert "x" * 500 in history
         assert "x" * 501 not in history
+
+    def test_recency_weighted_recent_messages_get_generous_cap(self, nodes):
+        # Last recent_n messages should use recent_max_content, not max_content.
+        # 6 prior messages + 1 current = 7 total; recent_n=4 → cutoff at index 2.
+        # Messages at i<2 (old) get max_content=200; i>=2 (recent) get recent_max_content=1500.
+        old_answer = "old" * 400    # 1200 chars — should be cut to 200
+        recent_answer = "new" * 600  # 1800 chars — should be cut to 1500
+        messages = [
+            HumanMessage("old question"),
+            AIMessage(old_answer),
+            HumanMessage("turn 2 question"),
+            AIMessage("turn 2 answer"),
+            HumanMessage("recent question"),
+            AIMessage(recent_answer),
+            HumanMessage("current turn"),  # excluded as current message
+        ]
+        history = nodes._format_history(
+            messages, recent_n=4, recent_max_content=1500, max_content=200
+        )
+        # Old answer (index 1, beyond recent_n cutoff) capped at 200 chars
+        assert "old" * 66 in history       # 198 chars — within 200
+        assert "old" * 67 not in history   # 201 chars — over 200
+        # Recent answer (index 5, within recent_n) capped at 1500 chars
+        assert "new" * 500 in history      # 1500 chars — at limit
+        assert "new" * 501 not in history  # 1503 chars — over limit
+
+    def test_recency_weighted_fewer_messages_than_recent_n_all_get_generous_cap(self, nodes):
+        # When prior has fewer messages than recent_n, all get recent_max_content.
+        long_answer = "z" * 1000
+        messages = [
+            HumanMessage("question"),
+            AIMessage(long_answer),
+            HumanMessage("follow up"),
+        ]
+        history = nodes._format_history(
+            messages, recent_n=4, recent_max_content=1500, max_content=200
+        )
+        assert "z" * 1000 in history  # full content preserved, under 1500
+
+    def test_recency_weighted_zero_recent_n_uses_flat_cap(self, nodes):
+        # recent_n=0 must behave exactly like the original flat max_content.
+        long_answer = "a" * 1000
+        messages = [HumanMessage("q"), AIMessage(long_answer), HumanMessage("follow")]
+        history = nodes._format_history(messages, recent_n=0, max_content=300)
+        assert "a" * 300 in history
+        assert "a" * 301 not in history
 
 
 class TestMCPNode:
@@ -478,13 +601,22 @@ class TestValidateResponse:
     def nodes(self):
         return AgentNodes(llm=MagicMock(), mcp_tools=MagicMock(), retriever=MagicMock())
 
-    def _make_state(self, final_response: str, mcp_result: str = "N/A", rag_result: str = "N/A"):
+    def _make_state(
+        self,
+        final_response: str,
+        mcp_result: str = "N/A",
+        rag_result: str = "N/A",
+        query_type: str = "data",
+        messages: list | None = None,
+    ):
         # Mirrors real graph state: format_response._emit appends an AIMessage before
         # validate_response runs, so messages[-1] is always an AIMessage here.
+        if messages is None:
+            messages = [HumanMessage("show me issues"), AIMessage(content=final_response)]
         return AgentState(
             {
-                "messages": [HumanMessage("show me issues"), AIMessage(content=final_response)],
-                "query_type": "data",
+                "messages": messages,
+                "query_type": query_type,
                 "docs_query": "",
                 "mcp_result": mcp_result,
                 "rag_result": rag_result,
@@ -498,6 +630,58 @@ class TestValidateResponse:
         assert result["validation_score"] == 1.0
         assert result["validation_flagged"] is False
         nodes._llm.with_structured_output.assert_not_called()
+
+    def test_synthesis_validates_against_conversation_history(self, nodes):
+        # synthesis_node sets both results to N/A; validator must NOT short-circuit —
+        # it should call the LLM using conversation history as the grounding context.
+        grounded = GroundednessResult(
+            score=0.9, is_grounded=True, flagged_claims=[], reasoning="summary matches history"
+        )
+        nodes._llm.with_structured_output.return_value.invoke.return_value = grounded
+        prior_messages = [
+            HumanMessage("Show me critical issues"),
+            AIMessage("There is 1 critical issue: ISS-001, SQL Injection in auth-service."),
+            HumanMessage("summarize what we found"),
+        ]
+        synthesis_response = "We found 1 critical SQL Injection issue in auth-service (ISS-001)."
+        state = self._make_state(
+            final_response=synthesis_response,
+            mcp_result="N/A",
+            rag_result="N/A",
+            query_type="synthesis",
+            messages=prior_messages + [AIMessage(content=synthesis_response)],
+        )
+        result = nodes.validate_response(state)
+        nodes._llm.with_structured_output.assert_called_once()
+        assert result["validation_score"] == 0.9
+        assert result["validation_flagged"] is False
+
+    def test_synthesis_ungrounded_appends_warning(self, nodes):
+        # If synthesis hallucinates a fact not in the history, the warning must appear.
+        ungrounded = GroundednessResult(
+            score=0.3,
+            is_grounded=False,
+            flagged_claims=["CVSS 9.8 not mentioned in conversation history"],
+            reasoning="Score was not present in prior turns",
+        )
+        nodes._llm.with_structured_output.return_value.invoke.return_value = ungrounded
+        prior_messages = [
+            HumanMessage("Show me critical issues"),
+            AIMessage("There is 1 critical issue: ISS-001, SQL Injection."),
+            HumanMessage("what's the cvss score?"),
+        ]
+        synthesis_response = "The CVSS score is 9.8."
+        state = self._make_state(
+            final_response=synthesis_response,
+            mcp_result="N/A",
+            rag_result="N/A",
+            query_type="synthesis",
+            messages=prior_messages + [AIMessage(content=synthesis_response)],
+        )
+        result = nodes.validate_response(state)
+        assert result["validation_flagged"] is True
+        assert "⚠️" in result["final_response"]
+        assert "CVSS 9.8 not mentioned in conversation history" in result["final_response"]
 
     def test_grounded_response_passes_without_modification(self, nodes):
         grounded = GroundednessResult(

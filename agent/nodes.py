@@ -10,7 +10,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 
 from agent.charts import SecurityCharts
 from agent.guardrails import InputGuardrail
-from agent.prompts import CLASSIFIER_PROMPT, FORMATTER_PROMPT, VALIDATOR_PROMPT
+from agent.prompts import CLASSIFIER_PROMPT, FORMATTER_PROMPT, SYNTHESIS_PROMPT, VALIDATOR_PROMPT
 from agent.state import AgentState, GroundednessResult, QueryClassification
 from mcp_client.tools import SecurityMCPTools
 from rag.retriever import RAGRetriever
@@ -46,15 +46,23 @@ class AgentNodes:
                 "standalone_query": "",
                 "wants_chart": False,
                 "group_by_field": None,
+                "active_entities": state.get("active_entities") or [],
                 "final_response": safe_msg,
                 "messages": [AIMessage(content=safe_msg)],
             }
 
-        history = self._format_history(messages)
+        history = self._format_history(
+            messages, recent_n=4, recent_max_content=1500, max_content=200
+        )
         wants_chart = any(kw in query.lower() for kw in self._CHART_KEYWORDS)
+        current_entities: list[str] = state.get("active_entities") or []
+        raw_entities_str = ", ".join(current_entities) if current_entities else "(none)"
+        entities_str = InputGuardrail.sanitize_for_xml_context(raw_entities_str, "active_entities")
         try:
             classifier = self._llm.with_structured_output(QueryClassification)
-            prompt_value = CLASSIFIER_PROMPT.invoke({"history": history, "query": query})
+            prompt_value = CLASSIFIER_PROMPT.invoke(
+                {"history": history, "query": query, "active_entities": entities_str}
+            )
             result = cast(QueryClassification, classifier.invoke(prompt_value))
             query_type = result.query_type
             if query_type == "chart" and any(
@@ -63,11 +71,17 @@ class AgentNodes:
                 query_type = "data"
                 logger.info("Overriding 'chart' → 'data': query contains data entities")
             standalone = result.standalone_query or query
+            standalone = self._enforce_multi_entity(
+                standalone, query, result.active_entities, current_entities
+            )
+            # Accumulate entities: new entities take priority (recency-biased), deduped, capped at 10.
+            merged_entities = list(dict.fromkeys(result.active_entities + current_entities))[:10]
             logger.info(
-                "Classified '%s' as '%s' (standalone: '%s')",
+                "Classified '%s' as '%s' (standalone: '%s', entities: %s)",
                 query[:50],
                 query_type,
                 standalone[:60],
+                merged_entities,
             )
             return {
                 **self._fresh_results(query_type),
@@ -76,6 +90,7 @@ class AgentNodes:
                 "standalone_query": standalone,
                 "wants_chart": wants_chart,
                 "group_by_field": self._detect_group_by(standalone),
+                "active_entities": merged_entities,
             }
         except Exception:
             logger.exception("Classification failed, defaulting to 'mixed'")
@@ -86,6 +101,7 @@ class AgentNodes:
                 "standalone_query": query,
                 "wants_chart": wants_chart,
                 "group_by_field": self._detect_group_by(query),
+                "active_entities": current_entities,
             }
 
     @staticmethod
@@ -102,12 +118,21 @@ class AgentNodes:
         }
 
     @staticmethod
-    def _format_history(messages: list[BaseMessage], max_messages: int = 6) -> str:
-        # Recent turns feed the classifier so it can resolve follow-up references; truncated to
-        # keep the prompt small.
+    def _format_history(
+        messages: list[BaseMessage],
+        max_messages: int = 10,
+        max_content: int = 500,
+        recent_n: int = 0,
+        recent_max_content: int = 500,
+    ) -> str:
+        # Recency-weighted truncation: when recent_n > 0, the last recent_n messages get
+        # recent_max_content chars while older ones get max_content. This keeps the classifier
+        # prompt small overall while preserving full entity names in the most recent turns.
+        # Synthesis calls pass max_content=3000 with recent_n=0 (flat cap across all turns).
         prior = messages[:-1][-max_messages:]
+        recent_cutoff = len(prior) - recent_n if recent_n > 0 else len(prior)
         lines: list[str] = []
-        for msg in prior:
+        for i, msg in enumerate(prior):
             if isinstance(msg, HumanMessage):
                 role = "User"
             elif isinstance(msg, AIMessage):
@@ -115,8 +140,35 @@ class AgentNodes:
             else:
                 continue
             content = msg.content if isinstance(msg.content, str) else str(msg.content)
-            lines.append(f"{role}: {content[:500]}")
+            limit = recent_max_content if i >= recent_cutoff else max_content
+            lines.append(f"{role}: {content[:limit]}")
         return "\n".join(lines) if lines else "(no prior conversation)"
+
+    @staticmethod
+    def _enforce_multi_entity(
+        standalone: str,
+        raw_query: str,
+        new_entities: list[str],
+        current_entities: list[str],
+    ) -> str:
+        """Deterministic guard for multi-entity comparisons.
+
+        When the raw query contains comparison language but the classifier resolved
+        fewer entities than are available in active history, inject the missing entity
+        names into standalone_query so the MCP LLM makes separate tool calls for each.
+        Injects at most 2 missing entities (the dominant "compare both" case).
+        """
+        if not any(kw in raw_query.lower() for kw in AgentNodes._COMPARISON_KEYWORDS):
+            return standalone
+        missing = [
+            e for e in current_entities
+            if e not in new_entities and e not in standalone
+        ]
+        if not missing:
+            return standalone
+        to_inject = missing[:2]
+        logger.info("Multi-entity guard: injecting %s into standalone_query", to_inject)
+        return standalone + " and " + " and ".join(to_inject)
 
     @staticmethod
     def _detect_group_by(query: str) -> str | None:
@@ -125,6 +177,26 @@ class AgentNodes:
             if phrase in q:
                 return field
         return None
+
+    def synthesis_node(self, state: AgentState) -> dict:
+        query = state.get("standalone_query") or cast(str, state["messages"][-1].content)
+        raw_history = self._format_history(state["messages"], max_content=3000)
+        history = InputGuardrail.sanitize_for_xml_context(raw_history, "conversation_history")
+        try:
+            chain = SYNTHESIS_PROMPT | self._llm
+            response = chain.invoke({"history": history, "query": query})
+            return {
+                **self._emit(cast(str, response.content)),
+                "mcp_result": "N/A",
+                "rag_result": "N/A",
+            }
+        except Exception:
+            logger.exception("Synthesis node failed for query: %s", query[:50])
+            return {
+                **self._emit("Sorry, I could not generate a response from the conversation history."),
+                "mcp_result": "N/A",
+                "rag_result": "N/A",
+            }
 
     @staticmethod
     def _build_mcp_system() -> SystemMessage:
@@ -181,7 +253,18 @@ class AgentNodes:
             "GENERAL FINDINGS:\n"
             "- For 'all issues' or unspecific queries: call BOTH get_security_issues AND get_pipeline_issues. "
             "If the user says 'security issues', call ONLY get_security_issues.\n\n"
-            "Never guess or fabricate data. If filters return no results, say so clearly."
+            "Never guess or fabricate data. If filters return no results, say so clearly.\n\n"
+            "COMPARING MULTIPLE SERVICES: When the query asks to compare, contrast, or show "
+            "side-by-side data for two or more named services, make SEPARATE tool calls for EACH "
+            "service. For example, to compare auth-service and payment-service: call "
+            "get_security_issues(application='auth-service'), "
+            "get_security_issues(application='payment-service'), "
+            "get_pipeline_issues(pipeline='auth-service-ci'), and "
+            "get_pipeline_issues(pipeline='payment-service-ci') as four separate calls.\n\n"
+            "ZERO-VULNERABILITY QUERIES: If the user asks which apps have zero issues or "
+            "vulnerabilities, call get_applications() with no filter to get all apps, then "
+            "identify those with issue_count == 0 in your response. Do not say you cannot "
+            "filter by zero — fetch all and filter yourself."
         )
 
     async def mcp_node(self, state: AgentState) -> dict:
@@ -246,9 +329,12 @@ class AgentNodes:
 
     _GROUNDEDNESS_THRESHOLD: float = 0.7
 
-    _AGGREGATION_KEYWORDS = frozenset(
-        ["how many", "how much", "in total", "total", "count", "how much there"]
-    )
+    _AGGREGATION_KEYWORDS = frozenset([
+        "how many", "how much", "in total", "total", "count", "how much there",
+        "zero vulnerabilities", "zero issues", "zero open issues",
+        "no vulnerabilities", "no issues", "no open issues",
+        "which have zero", "have no issues", "have zero",
+    ])
     # Maps query phrases to the JSON field to group by. Detected once in classify_query
     # and stored in state so mcp_node and format_response don't duplicate the logic.
     _GROUP_BY_FIELDS: dict[str, str] = {
@@ -263,6 +349,16 @@ class AgentNodes:
         "by status": "status",            "per status": "status",
         "status breakdown": "status",
     }
+    _FIELD_SPECIFIC_KEYWORDS = frozenset([
+        "cvss", "cvss score", "risk score", "exploit", "epss", "patch date",
+        "remediation date", "fix date", "cvss vector", "base score",
+    ])
+
+    _COMPARISON_KEYWORDS = frozenset([
+        "compare", "vs", "versus", "both", "each", "side by side",
+        "contrast", "how do they", "how do both",
+    ])
+
     _CHART_KEYWORDS = frozenset(
         ["chart", "graph", "visualize", "visualization", "plot"]
     )
@@ -369,8 +465,11 @@ class AgentNodes:
                 if det:
                     return self._emit(det)
             # Render pure data deterministically so no rows get dropped; other aggregation
-            # queries go through the LLM to synthesize a count or narrative.
-            if rag_result == "N/A" and mcp_result != "N/A" and not is_aggregation:
+            # queries and field-specific queries go through the LLM to synthesize a response.
+            # Field-specific queries (asking for a named attribute) need the LLM so it can
+            # explicitly state when a field is absent rather than silently showing adjacent data.
+            is_field_specific = any(kw in query.lower() for kw in self._FIELD_SPECIFIC_KEYWORDS)
+            if rag_result == "N/A" and mcp_result != "N/A" and not is_aggregation and not is_field_specific:
                 return self._emit(self._format_mcp_as_markdown(mcp_result))
             response = self._formatter.invoke(
                 {
@@ -487,19 +586,25 @@ class AgentNodes:
         response = state.get("final_response", "")
         mcp_result = state.get("mcp_result") or "N/A"
         rag_result = state.get("rag_result") or "N/A"
+        query_type = state.get("query_type", "")
+        is_synthesis = query_type == "synthesis" and mcp_result == "N/A" and rag_result == "N/A"
 
-        # Nothing to validate against — skip
-        if mcp_result == "N/A" and rag_result == "N/A":
+        # Nothing to validate against — skip (non-synthesis path only)
+        if mcp_result == "N/A" and rag_result == "N/A" and not is_synthesis:
             return {"validation_score": 1.0, "validation_flagged": False}
 
-        # Guard: if format_response emitted nothing, there's nothing to validate
+        # Guard: if no response was emitted, there's nothing to validate
         if not response:
             return {"validation_score": 1.0, "validation_flagged": False}
 
-        context = (
-            f"MCP Data:\n{InputGuardrail.sanitize_for_xml_context(mcp_result, 'context')}\n\n"
-            f"Documentation:\n{InputGuardrail.sanitize_for_xml_context(rag_result, 'context')}"
-        )
+        if is_synthesis:
+            raw_history = self._format_history(state["messages"][:-1], max_content=3000)
+            context = f"Conversation History:\n{InputGuardrail.sanitize_for_xml_context(raw_history, 'context')}"
+        else:
+            context = (
+                f"MCP Data:\n{InputGuardrail.sanitize_for_xml_context(mcp_result, 'context')}\n\n"
+                f"Documentation:\n{InputGuardrail.sanitize_for_xml_context(rag_result, 'context')}"
+            )
         try:
             validator = self._llm.with_structured_output(GroundednessResult)
             result = cast(

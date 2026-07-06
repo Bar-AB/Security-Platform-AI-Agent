@@ -29,6 +29,7 @@ class GraphBuilder:
         graph.add_node("mcp_node", self._nodes.mcp_node)
         graph.add_node("rag_node", self._nodes.rag_node)
         graph.add_node("chart_node", self._nodes.chart_node)
+        graph.add_node("synthesis_node", self._nodes.synthesis_node)
         graph.add_node("format_response", self._nodes.format_response)
         graph.add_node("validate_response", self._nodes.validate_response)
 
@@ -39,6 +40,9 @@ class GraphBuilder:
         # chart_node renders already-fetched data and makes no new factual claims,
         # so it routes directly to END and intentionally bypasses validate_response.
         graph.add_edge("chart_node", END)
+        # synthesis_node answers from conversation history; no external data to validate,
+        # so validate_response short-circuits (mcp_result and rag_result are both "N/A").
+        graph.add_edge("synthesis_node", "validate_response")
         graph.add_edge("format_response", "validate_response")
         graph.add_edge("validate_response", END)
 
@@ -49,6 +53,8 @@ class GraphBuilder:
         qtype = state["query_type"]
         if qtype == "blocked":
             return END
+        if qtype == "synthesis":
+            return "synthesis_node"
         if qtype == "chart":
             return "chart_node"
         if qtype == "data":
