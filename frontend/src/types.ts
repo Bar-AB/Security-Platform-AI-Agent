@@ -1,4 +1,4 @@
-export type QueryType = 'data' | 'doc' | 'mixed'
+export type QueryType = 'data' | 'doc' | 'mixed' | 'synthesis'
 
 export interface Message {
   id: string

@@ -28,6 +28,12 @@ describe('ChatMessage', () => {
     expect(screen.getByText('Mixed')).toBeInTheDocument()
   })
 
+  it('renders Synthesis badge for synthesis queries', () => {
+    const msg: Message = { id: '6', role: 'assistant', content: 'based on history', queryType: 'synthesis' }
+    render(<ChatMessage message={msg} />)
+    expect(screen.getByText('Synthesis')).toBeInTheDocument()
+  })
+
   it('shows no badge for user messages', () => {
     const msg: Message = { id: '5', role: 'user', content: 'hello', queryType: 'data' }
     render(<ChatMessage message={msg} />)

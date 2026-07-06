@@ -131,9 +131,14 @@ export default function App() {
             </p>
             <div className="flex gap-2 flex-wrap justify-center mt-2">
               {[
-                'Show critical issues',
-                'How do I set up the GitHub connector?',
-                'What are the top vulnerable apps?',
+                'Show me all critical security issues',
+                'What apps have the highest risk score?',
+                'Show pipeline findings in payment-service',
+                'How many open issues are there by severity?',
+                'Compare auth-service and payment-service',
+                'What is Log4Shell and are we affected?',
+                'How do I configure the GitHub connector?',
+                'Show a chart of issues by severity',
               ].map(hint => (
                 <button
                   key={hint}
