@@ -1,7 +1,8 @@
 import json
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 from fastapi.testclient import TestClient
-from unittest.mock import AsyncMock, MagicMock, patch
 
 from agent.factory import AgentFactory
 from api.main import app
@@ -21,9 +22,8 @@ class TestChatEndpoint:
 
     @pytest.fixture
     def client(self, mock_agent):
-        with patch.object(AgentFactory, "build", return_value=mock_agent):
-            with TestClient(app) as c:
-                yield c
+        with patch.object(AgentFactory, "build", return_value=mock_agent), TestClient(app) as c:
+            yield c
 
     def test_chat_returns_response(self, client):
         resp = client.post("/chat", json={"message": "show critical issues"})
@@ -37,13 +37,21 @@ class TestChatEndpoint:
         _, kwargs = mock_agent.ainvoke.call_args
         assert kwargs["config"]["configurable"]["thread_id"] == "t-abc"
 
+    def test_chat_reports_unknown_confidence_when_validation_failed(self, client, mock_agent):
+        mock_agent.ainvoke = AsyncMock(
+            return_value={"final_response": "ok", "query_type": "data", "validation_score": None}
+        )
+        resp = client.post("/chat", json={"message": "test"})
+        assert resp.status_code == 200
+        assert resp.json()["confidence_score"] is None
+
     def test_chat_returns_error_on_agent_failure(self, client, mock_agent):
         mock_agent.ainvoke = AsyncMock(side_effect=RuntimeError("agent crashed"))
         resp = client.post("/chat", json={"message": "test"})
         assert resp.status_code == 200
         body = resp.json()
         assert body["query_type"] == "unknown"
-        assert "Something went wrong" in body["response"]
+        assert body["response"] == "The agent could not process this request. Please try again."
 
     def test_health_returns_ok(self, client):
         resp = client.get("/health")
@@ -52,10 +60,7 @@ class TestChatEndpoint:
 
 
 class TestChatStreamEndpoint:
-    """Tests for the /chat/stream SSE endpoint."""
-
     def _make_stream_event(self, kind: str, **kwargs) -> dict:
-        """Build a minimal LangGraph astream_events event dict."""
         return {"event": kind, "metadata": {}, "data": {}, "name": "", **kwargs}
 
     def _token_event(self, text: str, node: str = "format_response") -> dict:
@@ -84,9 +89,8 @@ class TestChatStreamEndpoint:
 
     @pytest.fixture
     def client(self, mock_agent):
-        with patch.object(AgentFactory, "build", return_value=mock_agent):
-            with TestClient(app) as c:
-                yield c
+        with patch.object(AgentFactory, "build", return_value=mock_agent), TestClient(app) as c:
+            yield c
 
     def _setup_stream(self, mock_agent, events: list) -> None:
         async def _async_gen(*args, **kwargs):
@@ -96,7 +100,6 @@ class TestChatStreamEndpoint:
         mock_agent.astream_events = _async_gen
 
     def _parse_sse(self, text: str) -> list[dict]:
-        """Parse SSE body into a list of JSON event dicts."""
         events = []
         for line in text.splitlines():
             if line.startswith("data: "):
@@ -159,7 +162,7 @@ class TestChatStreamEndpoint:
     def test_stream_error_event_on_agent_exception(self, client, mock_agent):
         async def _boom(*args, **kwargs):
             raise RuntimeError("agent exploded")
-            yield  # make it an async generator
+            yield
 
         mock_agent.astream_events = _boom
         resp = client.post("/chat/stream", json={"message": "crash"})
@@ -167,7 +170,9 @@ class TestChatStreamEndpoint:
         parsed = self._parse_sse(resp.text)
         error_events = [e for e in parsed if e.get("type") == "error"]
         assert len(error_events) == 1
-        assert error_events[0]["content"] == "Stream failed."
+        assert error_events[0]["content"] == (
+            "The agent could not complete this response. Please try again."
+        )
 
     def test_stream_uses_thread_id_from_request(self, client, mock_agent):
         captured_config = {}
@@ -175,7 +180,7 @@ class TestChatStreamEndpoint:
         async def _capture(*args, **kwargs):
             captured_config.update(kwargs.get("config", {}))
             return
-            yield  # make it an async generator
+            yield
 
         mock_agent.astream_events = _capture
         client.post("/chat/stream", json={"message": "test", "thread_id": "thread-xyz"})

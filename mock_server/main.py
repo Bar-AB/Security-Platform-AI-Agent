@@ -17,10 +17,46 @@ _SEVERITY_RANK = {
 
 logger = logging.getLogger(__name__)
 
+_ISSUES_DESCRIPTION = (
+    "Get security issues. Filters:\n"
+    "- id: exact issue ID (e.g. 'ISS-001') — returns a single issue\n"
+    "- severity: critical, high, medium, low\n"
+    "- category: injection, xss, broken_auth, exposed_data, misconfig, dependency\n"
+    "- status: open, in_progress, resolved\n"
+    "- application: service name (e.g. 'payment-service', 'auth-service', 'user-service')\n"
+    "- keyword: case-insensitive substring match on the issue title\n"
+    "- cve_id: exact CVE identifier (e.g. 'CVE-2021-44228')\n"
+    "- discovered_after: ISO date (YYYY-MM-DD), returns issues discovered on or after this date\n"
+    "- discovered_before: ISO date (YYYY-MM-DD), returns issues discovered on or before this date\n"
+    "- limit: max number of results to return"
+)
+
+_APPLICATIONS_DESCRIPTION = (
+    "Get applications sorted by risk score descending (most vulnerable first).\n"
+    "Optionally filter by minimum risk score (0-10) and/or cap results with limit."
+)
+
+_PIPELINE_DESCRIPTION = (
+    "Get CI/CD pipeline security findings. Filters:\n"
+    "- id: exact finding ID (e.g. 'PIPE-006') — returns a single finding\n"
+    "- severity: critical, high, medium, low\n"
+    "- pipeline: CI/CD pipeline name (e.g. 'auth-service-ci', 'payment-service-ci'); substring "
+    "match\n"
+    "- stage: pipeline stage name (e.g. 'sast', 'dependency-scan', 'secret-scan', "
+    "'container-scan', 'dast')\n"
+    "- tool: scanner tool name (e.g. 'Trivy', 'Semgrep', 'Gitleaks', 'OWASP ZAP')\n"
+    "- branch: git branch name; supports prefix match (e.g. 'feature' matches "
+    "'feature/login-refactor')\n"
+    "- keyword: case-insensitive substring match on title (e.g. 'AWS', 'log4j', 'secret', 'JWT')\n"
+    "- detected_after: ISO date (YYYY-MM-DD), returns findings detected on or after this date\n"
+    "- detected_before: ISO date (YYYY-MM-DD), returns findings detected on or before this date\n"
+    "- limit: max number of results to return"
+)
+
 _mcp = FastMCP("security-platform")
 
 
-@_mcp.tool()
+@_mcp.tool(description=_ISSUES_DESCRIPTION)
 def get_security_issues(
     id: str | None = None,
     severity: str | None = None,
@@ -33,17 +69,6 @@ def get_security_issues(
     discovered_before: str | None = None,
     limit: int | None = None,
 ) -> list[dict]:
-    """Get security issues. Filters:
-    - id: exact issue ID (e.g. 'ISS-001') — returns a single issue
-    - severity: critical, high, medium, low
-    - category: injection, xss, broken_auth, exposed_data, misconfig, dependency
-    - status: open, in_progress, resolved
-    - application: service name (e.g. 'payment-service', 'auth-service', 'user-service')
-    - keyword: case-insensitive substring match on the issue title
-    - cve_id: exact CVE identifier (e.g. 'CVE-2021-44228')
-    - discovered_after: ISO date (YYYY-MM-DD), returns issues discovered on or after this date
-    - discovered_before: ISO date (YYYY-MM-DD), returns issues discovered on or before this date
-    - limit: max number of results to return"""
     issues = MOCK_ISSUES
     if id:
         issues = [i for i in issues if i.id.upper() == id.upper()]
@@ -72,12 +97,8 @@ def get_security_issues(
     return [i.model_dump() for i in issues]
 
 
-@_mcp.tool()
-def get_applications(
-    min_risk_score: float | None = None, limit: int | None = None
-) -> list[dict]:
-    """Get applications sorted by risk score descending (most vulnerable first).
-    Optionally filter by minimum risk score (0-10) and/or cap results with limit."""
+@_mcp.tool(description=_APPLICATIONS_DESCRIPTION)
+def get_applications(min_risk_score: float | None = None, limit: int | None = None) -> list[dict]:
     apps = MOCK_APPLICATIONS
     if min_risk_score is not None:
         apps = [a for a in apps if a.risk_score >= min_risk_score]
@@ -88,7 +109,7 @@ def get_applications(
     return [a.model_dump() for a in apps]
 
 
-@_mcp.tool()
+@_mcp.tool(description=_PIPELINE_DESCRIPTION)
 def get_pipeline_issues(
     id: str | None = None,
     severity: str | None = None,
@@ -101,17 +122,6 @@ def get_pipeline_issues(
     detected_before: str | None = None,
     limit: int | None = None,
 ) -> list[dict]:
-    """Get CI/CD pipeline security findings. Filters:
-    - id: exact finding ID (e.g. 'PIPE-006') — returns a single finding
-    - severity: critical, high, medium, low
-    - pipeline: CI/CD pipeline name (e.g. 'auth-service-ci', 'payment-service-ci'); substring match
-    - stage: pipeline stage name (e.g. 'sast', 'dependency-scan', 'secret-scan', 'container-scan', 'dast')
-    - tool: scanner tool name (e.g. 'Trivy', 'Semgrep', 'Gitleaks', 'OWASP ZAP')
-    - branch: git branch name; supports prefix match (e.g. 'feature' matches 'feature/login-refactor')
-    - keyword: case-insensitive substring match on title (e.g. 'AWS', 'log4j', 'secret', 'JWT')
-    - detected_after: ISO date (YYYY-MM-DD), returns findings detected on or after this date
-    - detected_before: ISO date (YYYY-MM-DD), returns findings detected on or before this date
-    - limit: max number of results to return"""
     issues = MOCK_PIPELINE_ISSUES
     if id:
         issues = [i for i in issues if i.id.upper() == id.upper()]
@@ -129,8 +139,7 @@ def get_pipeline_issues(
         issues = [
             i
             for i in issues
-            if i.branch.lower().startswith(branch_lower)
-            or branch_lower == i.branch.lower()
+            if i.branch.lower().startswith(branch_lower) or branch_lower == i.branch.lower()
         ]
     if keyword:
         kw = keyword.lower()
@@ -154,14 +163,15 @@ class _HealthMiddleware(BaseHTTPMiddleware):
             return JSONResponse(
                 {"status": "degraded", "reason": "mock data not loaded"}, status_code=503
             )
-        return JSONResponse({
-            "status": "ok",
-            "issues": len(MOCK_ISSUES),
-            "apps": len(MOCK_APPLICATIONS),
-            "pipeline_issues": len(MOCK_PIPELINE_ISSUES),
-        })
+        return JSONResponse(
+            {
+                "status": "ok",
+                "issues": len(MOCK_ISSUES),
+                "apps": len(MOCK_APPLICATIONS),
+                "pipeline_issues": len(MOCK_PIPELINE_ISSUES),
+            }
+        )
 
 
-# ASGI app for: uvicorn mock_server.main:app --port 8000
 app = _mcp.streamable_http_app()
 app.add_middleware(_HealthMiddleware)

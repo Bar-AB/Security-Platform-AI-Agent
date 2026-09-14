@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import sys
@@ -32,31 +33,29 @@ def main() -> None:
         "recursion_limit": 15,
     }
 
-    while True:
-        try:
-            user_input = input("You: ").strip()
-        except (KeyboardInterrupt, EOFError):
-            print("\nGoodbye.")
-            break
+    with asyncio.Runner() as runner:
+        while True:
+            try:
+                user_input = input("You: ").strip()
+            except (KeyboardInterrupt, EOFError):
+                print("\nGoodbye.")
+                break
 
-        if not user_input:
-            continue
-        if user_input.lower() in ("exit", "quit"):
-            print("Goodbye.")
-            break
+            if not user_input:
+                continue
+            if user_input.lower() in ("exit", "quit"):
+                print("Goodbye.")
+                break
 
-        try:
-            result = app.invoke(
-                {"messages": [HumanMessage(user_input)]},
-                config=config,
-            )
-            response = result.get("final_response", "No response generated.")
-            print(f"\nAgent: {response}\n")
-        except (
-            Exception
-        ):  # broad catch intentional: CLI loop must not crash on any agent error
-            logger.exception("Agent invocation failed")
-            print("Agent: Something went wrong. Is the mock server running?\n")
+            try:
+                result = runner.run(
+                    app.ainvoke({"messages": [HumanMessage(user_input)]}, config=config)
+                )
+                response = result.get("final_response", "No response generated.")
+                print(f"\nAgent: {response}\n")
+            except Exception:
+                logger.exception("Agent invocation failed")
+                print("Agent: Something went wrong. See the logs for details.\n")
 
 
 if __name__ == "__main__":

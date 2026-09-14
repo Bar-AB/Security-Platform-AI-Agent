@@ -37,11 +37,7 @@ class GraphBuilder:
         graph.add_conditional_edges("classify_query", self._route_after_classify)
         graph.add_edge("mcp_node", "format_response")
         graph.add_edge("rag_node", "format_response")
-        # chart_node renders already-fetched data and makes no new factual claims,
-        # so it routes directly to END and intentionally bypasses validate_response.
         graph.add_edge("chart_node", END)
-        # synthesis_node answers from conversation history; no external data to validate,
-        # so validate_response short-circuits (mcp_result and rag_result are both "N/A").
         graph.add_edge("synthesis_node", "validate_response")
         graph.add_edge("format_response", "validate_response")
         graph.add_edge("validate_response", END)
@@ -61,5 +57,4 @@ class GraphBuilder:
             return "mcp_node"
         if qtype == "doc":
             return "rag_node"
-        # mixed: run both branches in parallel
         return ["mcp_node", "rag_node"]

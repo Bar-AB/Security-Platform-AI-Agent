@@ -1,5 +1,9 @@
-# Claude Code — local overrides only, not shared
+# Local AI tooling and private notes
 .claude/settings.local.json
+CLAUDE.md
+.cc10x/
+.superpowers/
+project-docs/
 
 # Environment
 .env
@@ -46,5 +50,5 @@ temp/
 .vscode/
 *.swp
 
-# Superpowers planning docs (internal tooling, not relevant to reviewers)
+# Internal planning docs
 docs/superpowers/

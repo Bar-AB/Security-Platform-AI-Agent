@@ -16,7 +16,9 @@ MOCK_ISSUES: list[SecurityIssue] = [
         status=IssueStatus.OPEN,
         cve_id="CVE-2024-1234",
         application="user-service",
-        description="Unsanitized input in /api/users/search allows attackers to dump the users table.",
+        description=(
+            "Unsanitized input in /api/users/search allows attackers to dump the users table."
+        ),
         discovered_at="2024-11-01",
     ),
     SecurityIssue(
@@ -27,7 +29,9 @@ MOCK_ISSUES: list[SecurityIssue] = [
         status=IssueStatus.OPEN,
         cve_id=None,
         application="frontend-app",
-        description="The 404 error page reflects unescaped query parameters, enabling script injection.",
+        description=(
+            "The 404 error page reflects unescaped query parameters, enabling script injection."
+        ),
         discovered_at="2024-11-05",
     ),
     SecurityIssue(
@@ -38,7 +42,9 @@ MOCK_ISSUES: list[SecurityIssue] = [
         status=IssueStatus.OPEN,
         cve_id=None,
         application="auth-service",
-        description="Password reset tokens do not expire and can be replayed to take over any account.",
+        description=(
+            "Password reset tokens do not expire and can be replayed to take over any account."
+        ),
         discovered_at="2024-11-08",
     ),
     SecurityIssue(
@@ -93,7 +99,10 @@ MOCK_ISSUES: list[SecurityIssue] = [
         status=IssueStatus.OPEN,
         cve_id=None,
         application="admin-portal",
-        description="Admin notes are rendered without sanitization, allowing stored XSS for any admin viewer.",
+        description=(
+            "Admin notes are rendered without sanitization, allowing stored XSS for any admin "
+            "viewer."
+        ),
         discovered_at="2024-11-16",
     ),
     SecurityIssue(
@@ -115,7 +124,9 @@ MOCK_ISSUES: list[SecurityIssue] = [
         status=IssueStatus.OPEN,
         cve_id=None,
         application="api-gateway",
-        description="Session tokens are generated with 32-bit random seed, making brute-force feasible.",
+        description=(
+            "Session tokens are generated with 32-bit random seed, making brute-force feasible."
+        ),
         discovered_at="2024-11-20",
     ),
 ]

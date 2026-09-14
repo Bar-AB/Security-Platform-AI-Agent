@@ -3,10 +3,10 @@ import logging
 from pathlib import Path
 
 import chromadb
-from langchain_text_splitters import MarkdownHeaderTextSplitter
-from langchain_community.document_loaders import TextLoader
+from chromadb.errors import ChromaError, NotFoundError
 from langchain_core.documents import Document
 from langchain_openai import OpenAIEmbeddings
+from langchain_text_splitters import MarkdownHeaderTextSplitter
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +35,7 @@ class RAGIndexer:
                 return False
             stored_hash = (col.metadata or {}).get("docs_hash")
             return stored_hash == self._compute_docs_hash()
-        except Exception:
+        except (ChromaError, OSError):
             logger.debug("Collection not found or not indexed", exc_info=True)
             return False
 
@@ -47,14 +47,10 @@ class RAGIndexer:
         return h.hexdigest()
 
     def _load_documents(self) -> list[Document]:
-        docs: list[Document] = []
-        for path in self._docs_dir.glob("*.md"):
-            loader = TextLoader(str(path))
-            loaded = loader.load()
-            for doc in loaded:
-                doc.metadata["source"] = path.name
-            docs.extend(loaded)
-        return docs
+        return [
+            Document(page_content=path.read_text(encoding="utf-8"), metadata={"source": path.name})
+            for path in self._docs_dir.glob("*.md")
+        ]
 
     def _split_documents(self, docs: list[Document]) -> list[Document]:
         splitter = MarkdownHeaderTextSplitter(
@@ -72,13 +68,7 @@ class RAGIndexer:
 
     @staticmethod
     def _prepend_breadcrumb(chunk: Document) -> str:
-        # Child chunks (e.g. "### Setup Steps") carry no parent-header text, so their
-        # embeddings lose the "Jira Connector" context unless we add it explicitly.
-        parts = [
-            chunk.metadata[key]
-            for key in ("h1", "h2", "h3")
-            if chunk.metadata.get(key)
-        ]
+        parts = [chunk.metadata[key] for key in ("h1", "h2", "h3") if chunk.metadata.get(key)]
         if not parts:
             return chunk.page_content
         return " > ".join(parts) + "\n\n" + chunk.page_content
@@ -86,11 +76,10 @@ class RAGIndexer:
     def _store_chunks(self, chunks: list[Document], docs_hash: str) -> None:
         try:
             self._client.delete_collection(_COLLECTION_NAME)
-        except Exception:
-            pass
+        except NotFoundError:
+            logger.debug("No existing collection to delete", exc_info=True)
         collection = self._client.create_collection(
             _COLLECTION_NAME,
-            # cosine is the right metric for text embeddings; ChromaDB otherwise defaults to L2.
             metadata={"docs_hash": docs_hash, "hnsw:space": "cosine"},
         )
         texts = [c.page_content for c in chunks]
@@ -98,5 +87,8 @@ class RAGIndexer:
         embeddings = self._embeddings.embed_documents(texts)
         ids = [f"chunk_{i}" for i in range(len(chunks))]
         collection.add(
-            documents=texts, embeddings=embeddings, metadatas=metadatas, ids=ids  # type: ignore[arg-type]
+            documents=texts,
+            embeddings=embeddings,
+            metadatas=metadatas,  # type: ignore[arg-type]
+            ids=ids,
         )

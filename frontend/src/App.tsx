@@ -28,46 +28,41 @@ export default function App() {
     setIsLoading(true)
     setStreamingStatus(null)
 
-    // Placeholder assistant message updated token-by-token
     const assistantId = crypto.randomUUID()
     setMessages(prev => [
       ...prev,
       { id: assistantId, role: 'assistant', content: '', isStreaming: true },
     ])
 
-    // Accumulate tokens in a plain object ref to avoid stale closure issues.
-    // rAF batching caps DOM updates to ~60fps instead of one-per-token.
-    const acc = { current: '' }
-    const raf = { current: null as number | null }
+    const accumulatedText = { current: '' }
+    const pendingFrame = { current: null as number | null }
     let statusCleared = false
 
     await streamMessage(
       text,
       THREAD_ID,
-      // onToken
       (token) => {
         if (!statusCleared) {
           statusCleared = true
           setStreamingStatus(null)
         }
-        acc.current += token
-        if (raf.current === null) {
-          raf.current = requestAnimationFrame(() => {
-            raf.current = null
+        accumulatedText.current += token
+        if (pendingFrame.current === null) {
+          pendingFrame.current = requestAnimationFrame(() => {
+            pendingFrame.current = null
             setMessages(prev =>
-              prev.map(m => m.id === assistantId ? { ...m, content: acc.current } : m)
+              prev.map(m => m.id === assistantId ? { ...m, content: accumulatedText.current } : m)
             )
           })
         }
       },
-      // onDone
       (meta: StreamDoneEvent) => {
-        if (raf.current !== null) {
-          cancelAnimationFrame(raf.current)
-          raf.current = null
+        if (pendingFrame.current !== null) {
+          cancelAnimationFrame(pendingFrame.current)
+          pendingFrame.current = null
         }
         setStreamingStatus(null)
-        const content = acc.current || meta.final_response || 'No response generated.'
+        const content = accumulatedText.current || meta.final_response || 'No response generated.'
         setMessages(prev =>
           prev.map(m =>
             m.id === assistantId
@@ -76,7 +71,7 @@ export default function App() {
                   content,
                   isStreaming: false,
                   queryType: meta.query_type as QueryType,
-                  confidenceScore: meta.confidence_score,
+                  confidenceScore: meta.confidence_score ?? undefined,
                   validationFlagged: meta.validation_flagged,
                   chartImage: meta.chart_image ?? undefined,
                 }
@@ -85,11 +80,10 @@ export default function App() {
         )
         setIsLoading(false)
       },
-      // onError
       (errMsg) => {
-        if (raf.current !== null) {
-          cancelAnimationFrame(raf.current)
-          raf.current = null
+        if (pendingFrame.current !== null) {
+          cancelAnimationFrame(pendingFrame.current)
+          pendingFrame.current = null
         }
         setStreamingStatus(null)
         setMessages(prev =>
@@ -101,7 +95,6 @@ export default function App() {
         )
         setIsLoading(false)
       },
-      // onStatus
       (statusText: string) => {
         setStreamingStatus(statusText)
       },

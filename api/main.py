@@ -1,12 +1,12 @@
-import json as _json
+import json
 import logging
 import os
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, StreamingResponse
 from langchain_core.messages import HumanMessage
 from pydantic import BaseModel
 
@@ -24,7 +24,7 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     response: str
     query_type: str
-    confidence_score: float = 1.0
+    confidence_score: float | None = 1.0
     validation_flagged: bool = False
     chart_image: str | None = None
 
@@ -58,7 +58,9 @@ app.add_middleware(
 @app.get("/health")
 def health(request: Request) -> dict:
     if not hasattr(request.app.state, "agent") or request.app.state.agent is None:
-        return JSONResponse({"status": "degraded", "reason": "agent not initialized"}, status_code=503)
+        return JSONResponse(
+            {"status": "degraded", "reason": "agent not initialized"}, status_code=503
+        )
     return {"status": "ok"}
 
 
@@ -77,10 +79,10 @@ async def chat(req: ChatRequest, request: Request) -> ChatResponse:
             validation_flagged=result.get("validation_flagged", False),
             chart_image=result.get("chart_image"),
         )
-    except Exception:  # broad catch intentional: API must return 200 with error message rather than 500
+    except Exception:
         logger.exception("Agent invocation failed")
         return ChatResponse(
-            response="Something went wrong. Is the mock server running?",
+            response="The agent could not process this request. Please try again.",
             query_type="unknown",
         )
 
@@ -97,43 +99,48 @@ async def chat_stream(req: ChatRequest, request: Request) -> StreamingResponse:
                 version="v2",
             ):
                 kind = event["event"]
-                # Emit pipeline stage status before first token arrives
                 if kind == "on_chain_start":
                     node_name = event.get("name", "")
                     if (
                         node_name in _NODE_STATUS
                         and event.get("metadata", {}).get("langgraph_node") == node_name
                     ):
-                        status_payload = _json.dumps({"type": "status", "text": _NODE_STATUS[node_name]})
+                        status_payload = json.dumps(
+                            {"type": "status", "text": _NODE_STATUS[node_name]}
+                        )
                         yield f"data: {status_payload}\n\n"
-                # Stream formatter tokens only
                 elif (
                     kind == "on_chat_model_stream"
                     and event.get("metadata", {}).get("langgraph_node") == "format_response"
                 ):
                     chunk = event["data"]["chunk"].content
                     if chunk:
-                        payload = _json.dumps({"type": "token", "content": chunk})
+                        payload = json.dumps({"type": "token", "content": chunk})
                         yield f"data: {payload}\n\n"
-                # Capture final graph output
                 elif kind == "on_chain_end" and event.get("name") == "LangGraph":
                     output = event.get("data", {}).get("output", {})
                     if isinstance(output, dict):
                         final_state = output
         except Exception:
             logger.exception("Stream failed")
-            error_payload = _json.dumps({"type": "error", "content": "Stream failed."})
+            error_payload = json.dumps(
+                {
+                    "type": "error",
+                    "content": "The agent could not complete this response. Please try again.",
+                }
+            )
             yield f"data: {error_payload}\n\n"
             return
-        # Send done event with metadata (only reached when no exception occurred)
-        done_payload = _json.dumps({
-            "type": "done",
-            "query_type": final_state.get("query_type", "unknown"),
-            "confidence_score": final_state.get("validation_score", 1.0),
-            "validation_flagged": final_state.get("validation_flagged", False),
-            "chart_image": final_state.get("chart_image"),
-            "final_response": final_state.get("final_response", ""),
-        })
+        done_payload = json.dumps(
+            {
+                "type": "done",
+                "query_type": final_state.get("query_type", "unknown"),
+                "confidence_score": final_state.get("validation_score", 1.0),
+                "validation_flagged": final_state.get("validation_flagged", False),
+                "chart_image": final_state.get("chart_image"),
+                "final_response": final_state.get("final_response", ""),
+            }
+        )
         yield f"data: {done_payload}\n\n"
 
     return StreamingResponse(

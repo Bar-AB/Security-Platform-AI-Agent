@@ -3,17 +3,14 @@ import logging
 import chromadb
 from chromadb import QueryResult
 from langchain_core.documents import Document
-from langchain_openai import OpenAIEmbeddings
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import SystemMessage, HumanMessage as _HumanMessage
-
+from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_openai import OpenAIEmbeddings
 
 logger = logging.getLogger(__name__)
 
 _COLLECTION_NAME = "security_docs"
 _DEFAULT_K = 5
-# Cosine distance threshold: 1 - cosine_similarity, so 0.5 requires ≥ 0.5 cosine similarity.
-# Chunks above this are off-topic and excluded to prevent low-quality context from reaching the LLM.
 _DEFAULT_DISTANCE_THRESHOLD = 0.5
 
 
@@ -54,12 +51,9 @@ class RAGRetriever:
         distances = results.get("distances")
         if not documents or not metadatas:
             return []
-        # distances is always present when include=["distances"] is passed, but we
-        # defensively fall back to 0.0 (pass-through) rather than rejecting chunks
-        # whose distance is unknown — dropping context silently is worse than keeping it.
         raw_distances = distances[0] if distances else []
         docs: list[Document] = []
-        for i, (text, meta) in enumerate(zip(documents[0], metadatas[0])):
+        for i, (text, meta) in enumerate(zip(documents[0], metadatas[0], strict=False)):
             distance = raw_distances[i] if i < len(raw_distances) else 0.0
             if distance > self._distance_threshold:
                 logger.debug(
@@ -72,7 +66,8 @@ class RAGRetriever:
             docs.append(Document(page_content=text, metadata={**meta, "distance": distance}))
         if not docs and documents[0]:
             logger.info(
-                "All %d retrieved chunks exceeded distance threshold %.3f — no confident RAG results",
+                "All %d retrieved chunks exceeded distance threshold %.3f — no confident RAG "
+                "results",
                 len(documents[0]),
                 self._distance_threshold,
             )
@@ -87,6 +82,7 @@ _MULTI_QUERY_PROMPT = (
 )
 
 _MAX_VARIANTS = 3
+
 
 class MultiQueryRAGRetriever(RAGRetriever):
     def __init__(
@@ -108,16 +104,14 @@ class MultiQueryRAGRetriever(RAGRetriever):
                 if doc.page_content not in seen:
                     seen.add(doc.page_content)
                     docs.append(doc)
-        logger.debug(
-            "MultiQueryRAG: %d unique chunks from %d queries", len(docs), len(queries)
-        )
+        logger.debug("MultiQueryRAG: %d unique chunks from %d queries", len(docs), len(queries))
         return docs
 
     def _generate_queries(self, query: str) -> list[str]:
         try:
             prompt = _MULTI_QUERY_PROMPT.format(query=query)
             response = self._llm.invoke(
-                [SystemMessage(content=prompt), _HumanMessage(content=query)]
+                [SystemMessage(content=prompt), HumanMessage(content=query)]
             )
             raw = response.content
             content = raw if isinstance(raw, str) else str(raw)

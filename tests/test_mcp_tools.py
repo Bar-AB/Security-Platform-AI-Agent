@@ -1,6 +1,9 @@
-import pytest
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+from langchain_core.messages import AIMessage, HumanMessage
+
+from agent.nodes import AgentNodes
 from mcp_client.tools import SecurityMCPTools
 
 
@@ -8,19 +11,21 @@ class TestSecurityMCPTools:
     @pytest.fixture
     def mock_client(self):
         client = MagicMock()
-        client.call_tool = AsyncMock(return_value=[
-            {
-                "id": "ISS-001",
-                "title": "SQL Injection",
-                "severity": "critical",
-                "application": "user-service",
-                "status": "open",
-                "description": "...",
-                "category": "injection",
-                "discovered_at": "2024-11-01",
-                "cve_id": None,
-            }
-        ])
+        client.call_tool = AsyncMock(
+            return_value=[
+                {
+                    "id": "ISS-001",
+                    "title": "SQL Injection",
+                    "severity": "critical",
+                    "application": "user-service",
+                    "status": "open",
+                    "description": "...",
+                    "category": "injection",
+                    "discovered_at": "2024-11-01",
+                    "cve_id": None,
+                }
+            ]
+        )
         return client
 
     def test_tool_names(self, mock_client):
@@ -83,10 +88,43 @@ class TestSecurityMCPTools:
 
     @pytest.mark.asyncio
     async def test_get_applications_calls_client(self, mock_client):
-        mock_client.call_tool = AsyncMock(return_value=[{"id": "APP-001", "name": "payment-service", "risk_score": 9.1}])
+        mock_client.call_tool = AsyncMock(
+            return_value=[{"id": "APP-001", "name": "payment-service", "risk_score": 9.1}]
+        )
         result = await SecurityMCPTools(client=mock_client).get_applications(limit=3)
         mock_client.call_tool.assert_called_once_with(
             "get_applications",
             {"min_risk_score": None, "limit": 3},
         )
         assert "payment-service" in result
+
+    @pytest.mark.asyncio
+    async def test_get_security_issues_propagates_client_failure(self, mock_client):
+        mock_client.call_tool = AsyncMock(side_effect=ConnectionError("MCP server down"))
+        with pytest.raises(ConnectionError):
+            await SecurityMCPTools(client=mock_client).get_security_issues()
+
+    @pytest.mark.asyncio
+    async def test_unreachable_server_is_reported_as_error_not_empty(self, mock_client):
+        mock_client.call_tool = AsyncMock(side_effect=ConnectionError("MCP server down"))
+        llm = MagicMock()
+        llm.bind_tools.return_value.ainvoke = AsyncMock(
+            return_value=AIMessage(
+                content="",
+                tool_calls=[{"name": "get_security_issues", "args": {}, "id": "call-1"}],
+            )
+        )
+        nodes = AgentNodes(
+            llm=llm, mcp_tools=SecurityMCPTools(client=mock_client), retriever=MagicMock()
+        )
+        state = {
+            "messages": [HumanMessage("show me critical issues")],
+            "query_type": "data",
+            "mcp_result": "N/A",
+            "rag_result": "N/A",
+            "final_response": "",
+        }
+        state.update(await nodes.mcp_node(state))
+        final = nodes.format_response(state)["final_response"]
+        assert "No results found" not in final
+        assert "Error" in final

@@ -20,28 +20,29 @@ class MCPClient:
         wait=wait_exponential(min=1, max=4),
     )
     async def _call(self, tool_name: str, arguments: dict) -> list:
-        async with streamable_http_client(
-            self._url, http_client=httpx.AsyncClient(headers=self._headers)
-        ) as (read, write, _):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
-                result = await session.call_tool(tool_name, arguments)
-                if not result.content:
-                    return []
-                # FastMCP returns one TextContent per item, not a single JSON array
-                items: list = []
-                for content in result.content:
-                    if not hasattr(content, "text"):
-                        continue
-                    try:
-                        parsed = json.loads(content.text)
-                        if isinstance(parsed, list):
-                            items.extend(parsed)
-                        else:
-                            items.append(parsed)
-                    except (json.JSONDecodeError, ValueError):
-                        items.append(content.text)
-                return items
+        async with (
+            streamable_http_client(
+                self._url, http_client=httpx.AsyncClient(headers=self._headers)
+            ) as (read, write, _),
+            ClientSession(read, write) as session,
+        ):
+            await session.initialize()
+            result = await session.call_tool(tool_name, arguments)
+            if not result.content:
+                return []
+            items: list = []
+            for content in result.content:
+                if not hasattr(content, "text"):
+                    continue
+                try:
+                    parsed = json.loads(content.text)
+                    if isinstance(parsed, list):
+                        items.extend(parsed)
+                    else:
+                        items.append(parsed)
+                except (json.JSONDecodeError, ValueError):
+                    items.append(content.text)
+            return items
 
     async def call_tool(self, tool_name: str, arguments: dict) -> list:
         return await self._call(tool_name, arguments)

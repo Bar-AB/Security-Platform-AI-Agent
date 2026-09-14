@@ -1,7 +1,8 @@
 import asyncio
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pydantic
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 from langchain_core.documents import Document
 from langchain_core.messages import AIMessage, HumanMessage
 
@@ -59,9 +60,7 @@ class TestClassifyQueryChartDetection:
         )
 
     def test_chart_keyword_sets_wants_chart_true(self, nodes):
-        result = nodes.classify_query(
-            self._make_state("show me critical issues as a chart")
-        )
+        result = nodes.classify_query(self._make_state("show me critical issues as a chart"))
         assert result["wants_chart"] is True
 
     def test_graph_keyword_sets_wants_chart_true(self, nodes):
@@ -69,9 +68,7 @@ class TestClassifyQueryChartDetection:
         assert result["wants_chart"] is True
 
     def test_visualize_keyword_sets_wants_chart_true(self, nodes):
-        result = nodes.classify_query(
-            self._make_state("visualize the severity distribution")
-        )
+        result = nodes.classify_query(self._make_state("visualize the severity distribution"))
         assert result["wants_chart"] is True
 
     def test_plot_keyword_sets_wants_chart_true(self, nodes):
@@ -83,9 +80,7 @@ class TestClassifyQueryChartDetection:
         assert result["wants_chart"] is False
 
     def test_wants_chart_false_on_plain_data_query(self, nodes):
-        result = nodes.classify_query(
-            self._make_state("how many open issues are there?")
-        )
+        result = nodes.classify_query(self._make_state("how many open issues are there?"))
         assert result["wants_chart"] is False
 
     def test_wants_chart_case_insensitive(self, nodes):
@@ -105,9 +100,7 @@ class TestClassifyQuery:
             docs_query="",
             standalone_query="show me critical issues",
         )
-        mock_llm.with_structured_output.return_value.invoke.return_value = (
-            classification
-        )
+        mock_llm.with_structured_output.return_value.invoke.return_value = classification
 
         nodes = AgentNodes(llm=mock_llm, mcp_tools=MagicMock(), retriever=MagicMock())
         state: AgentState = {
@@ -128,9 +121,7 @@ class TestClassifyQuery:
             docs_query="Jira connector setup",
             standalone_query="how do I connect Jira?",
         )
-        mock_llm.with_structured_output.return_value.invoke.return_value = (
-            classification
-        )
+        mock_llm.with_structured_output.return_value.invoke.return_value = classification
 
         nodes = AgentNodes(llm=mock_llm, mcp_tools=MagicMock(), retriever=MagicMock())
         state: AgentState = {
@@ -145,16 +136,13 @@ class TestClassifyQuery:
         assert result["standalone_query"] == "how do I connect Jira?"
 
     def test_data_query_resets_stale_rag_result(self, mock_llm):
-        # Regression: a data follow-up after a doc turn must not inherit the prior rag_result.
         classification = QueryClassification(
             query_type="data",
             reasoning="asks for issue data",
             docs_query="",
             standalone_query="show me the high severity issues",
         )
-        mock_llm.with_structured_output.return_value.invoke.return_value = (
-            classification
-        )
+        mock_llm.with_structured_output.return_value.invoke.return_value = classification
 
         nodes = AgentNodes(llm=mock_llm, mcp_tools=MagicMock(), retriever=MagicMock())
         state: AgentState = {
@@ -169,16 +157,13 @@ class TestClassifyQuery:
         assert result["mcp_result"] == "N/A"
 
     def test_chart_query_preserves_prior_mcp_result(self, mock_llm):
-        # The "chart" route reuses the previous turn's mcp_result, so classify must not clear it.
         classification = QueryClassification(
             query_type="chart",
             reasoning="wants a chart of prior results",
             docs_query="",
             standalone_query="chart that",
         )
-        mock_llm.with_structured_output.return_value.invoke.return_value = (
-            classification
-        )
+        mock_llm.with_structured_output.return_value.invoke.return_value = classification
 
         nodes = AgentNodes(llm=mock_llm, mcp_tools=MagicMock(), retriever=MagicMock())
         state: AgentState = {
@@ -190,7 +175,7 @@ class TestClassifyQuery:
         }
         result = nodes.classify_query(state)
         assert result["query_type"] == "chart"
-        assert "mcp_result" not in result  # untouched → prior turn's data survives
+        assert "mcp_result" not in result
         assert result["rag_result"] == "N/A"
 
 
@@ -233,7 +218,6 @@ class TestEnforceMultiEntity:
             new_entities=["auth-service"],
             current_entities=["auth-service", "payment-service", "user-service", "api-gateway"],
         )
-        # Only first 2 missing should be injected
         assert "payment-service" in result
         assert "user-service" in result
         assert "api-gateway" not in result
@@ -248,7 +232,6 @@ class TestEnforceMultiEntity:
         assert result == "Compare both"
 
     def test_classify_query_injects_missing_entity_on_compare_both(self, mock_llm=None):
-        # End-to-end: classifier collapses "compare both" to one entity; guard must inject the other.
         mock_llm = MagicMock()
         classification = QueryClassification(
             query_type="data",
@@ -284,12 +267,11 @@ class TestFormatHistory:
         messages = [
             HumanMessage("How do I connect to GitHub?"),
             AIMessage("Use the GitHub connector under Settings."),
-            HumanMessage("What are the steps?"),  # current turn, excluded
+            HumanMessage("What are the steps?"),
         ]
         history = nodes._format_history(messages)
         assert "User: How do I connect to GitHub?" in history
         assert "Assistant: Use the GitHub connector under Settings." in history
-        # the current (last) message must not be part of the history
         assert "What are the steps?" not in history
 
     def test_truncates_long_message_content(self, nodes):
@@ -304,11 +286,8 @@ class TestFormatHistory:
         assert "x" * 501 not in history
 
     def test_recency_weighted_recent_messages_get_generous_cap(self, nodes):
-        # Last recent_n messages should use recent_max_content, not max_content.
-        # 6 prior messages + 1 current = 7 total; recent_n=4 → cutoff at index 2.
-        # Messages at i<2 (old) get max_content=200; i>=2 (recent) get recent_max_content=1500.
-        old_answer = "old" * 400    # 1200 chars — should be cut to 200
-        recent_answer = "new" * 600  # 1800 chars — should be cut to 1500
+        old_answer = "old" * 400
+        recent_answer = "new" * 600
         messages = [
             HumanMessage("old question"),
             AIMessage(old_answer),
@@ -316,20 +295,18 @@ class TestFormatHistory:
             AIMessage("turn 2 answer"),
             HumanMessage("recent question"),
             AIMessage(recent_answer),
-            HumanMessage("current turn"),  # excluded as current message
+            HumanMessage("current turn"),
         ]
         history = nodes._format_history(
             messages, recent_n=4, recent_max_content=1500, max_content=200
         )
-        # Old answer (index 1, beyond recent_n cutoff) capped at 200 chars
-        assert "old" * 66 in history       # 198 chars — within 200
-        assert "old" * 67 not in history   # 201 chars — over 200
-        # Recent answer (index 5, within recent_n) capped at 1500 chars
-        assert "new" * 500 in history      # 1500 chars — at limit
-        assert "new" * 501 not in history  # 1503 chars — over limit
+        old_cap, recent_cap = 200, 1500
+        assert old_answer[:old_cap] in history
+        assert old_answer[: old_cap + 1] not in history
+        assert recent_answer[:recent_cap] in history
+        assert recent_answer[: recent_cap + 1] not in history
 
     def test_recency_weighted_fewer_messages_than_recent_n_all_get_generous_cap(self, nodes):
-        # When prior has fewer messages than recent_n, all get recent_max_content.
         long_answer = "z" * 1000
         messages = [
             HumanMessage("question"),
@@ -339,10 +316,9 @@ class TestFormatHistory:
         history = nodes._format_history(
             messages, recent_n=4, recent_max_content=1500, max_content=200
         )
-        assert "z" * 1000 in history  # full content preserved, under 1500
+        assert "z" * 1000 in history
 
     def test_recency_weighted_zero_recent_n_uses_flat_cap(self, nodes):
-        # recent_n=0 must behave exactly like the original flat max_content.
         long_answer = "a" * 1000
         messages = [HumanMessage("q"), AIMessage(long_answer), HumanMessage("follow")]
         history = nodes._format_history(messages, recent_n=0, max_content=300)
@@ -402,9 +378,7 @@ class TestRAGNode:
         llm.with_structured_output.return_value.invoke.return_value = MagicMock()
         retriever = MagicMock()
         retriever.retrieve.return_value = [
-            Document(
-                page_content="Jira setup steps.", metadata={"source": "connectors.md"}
-            )
+            Document(page_content="Jira setup steps.", metadata={"source": "connectors.md"})
         ]
         retriever.format_for_prompt.return_value = "[connectors.md]\nJira setup steps."
         return AgentNodes(llm=llm, mcp_tools=MagicMock(), retriever=retriever)
@@ -441,9 +415,7 @@ class TestFormatResponse:
     def nodes(self):
         llm = MagicMock()
         llm.with_structured_output.return_value.invoke.return_value = MagicMock()
-        llm.invoke.return_value = MagicMock(
-            content="Here are the critical issues found."
-        )
+        llm.invoke.return_value = MagicMock(content="Here are the critical issues found.")
         return AgentNodes(llm=llm, mcp_tools=MagicMock(), retriever=MagicMock())
 
     def test_format_response_sets_final_response(self, nodes):
@@ -459,8 +431,6 @@ class TestFormatResponse:
         assert result["final_response"]
 
     def test_format_response_handles_exception(self, nodes):
-        # Needs both mcp and rag context so neither the no-context guard nor the
-        # deterministic MCP shortcut fires — forces the code path through the LLM formatter.
         nodes._formatter = MagicMock()
         nodes._formatter.invoke.side_effect = Exception("Chain failure")
         state: AgentState = {
@@ -515,7 +485,9 @@ class TestMCPNodeChartGuard:
 
         with (
             patch.object(nodes, "_try_generate_chart") as mock_chart,
-            patch.object(nodes, "_execute_tool_calls_async", new=AsyncMock(return_value="[result]")),
+            patch.object(
+                nodes, "_execute_tool_calls_async", new=AsyncMock(return_value="[result]")
+            ),
         ):
             asyncio.run(nodes.mcp_node(self._make_state(wants_chart=False)))
             mock_chart.assert_not_called()
@@ -530,7 +502,9 @@ class TestMCPNodeChartGuard:
 
         with (
             patch.object(nodes, "_try_generate_chart") as mock_chart,
-            patch.object(nodes, "_execute_tool_calls_async", new=AsyncMock(return_value="[result]")),
+            patch.object(
+                nodes, "_execute_tool_calls_async", new=AsyncMock(return_value="[result]")
+            ),
         ):
             asyncio.run(nodes.mcp_node(self._make_state(wants_chart=True)))
             mock_chart.assert_called_once_with("[result]")
@@ -557,39 +531,29 @@ class TestChartNode:
     def test_returns_no_data_message_when_mcp_result_empty(self, nodes):
         result = nodes.chart_node(self._make_state(""))
         assert (
-            result["final_response"]
-            == "No data available to chart. Please run a data query first."
+            result["final_response"] == "No data available to chart. Please run a data query first."
         )
 
     def test_returns_no_data_message_when_mcp_result_is_na(self, nodes):
         result = nodes.chart_node(self._make_state("N/A"))
         assert (
-            result["final_response"]
-            == "No data available to chart. Please run a data query first."
+            result["final_response"] == "No data available to chart. Please run a data query first."
         )
 
     def test_calls_try_generate_chart_with_mcp_result(self, nodes):
-        mcp_result = (
-            '[get_security_issues]\n[{"id": "ISS-001", "severity": "critical"}]'
-        )
+        mcp_result = '[get_security_issues]\n[{"id": "ISS-001", "severity": "critical"}]'
         with (
             patch.object(nodes, "_try_generate_chart") as mock_chart,
-            patch.object(
-                nodes, "_format_mcp_as_markdown", return_value="**formatted**"
-            ),
+            patch.object(nodes, "_format_mcp_as_markdown", return_value="**formatted**"),
         ):
             nodes.chart_node(self._make_state(mcp_result))
             mock_chart.assert_called_once_with(mcp_result)
 
     def test_includes_formatted_text_in_response(self, nodes):
-        mcp_result = (
-            '[get_security_issues]\n[{"id": "ISS-001", "severity": "critical"}]'
-        )
+        mcp_result = '[get_security_issues]\n[{"id": "ISS-001", "severity": "critical"}]'
         with (
             patch.object(nodes, "_try_generate_chart"),
-            patch.object(
-                nodes, "_format_mcp_as_markdown", return_value="**formatted results**"
-            ),
+            patch.object(nodes, "_format_mcp_as_markdown", return_value="**formatted results**"),
         ):
             result = nodes.chart_node(self._make_state(mcp_result))
         assert "Chart generated from previous results." in result["final_response"]
@@ -609,8 +573,6 @@ class TestValidateResponse:
         query_type: str = "data",
         messages: list | None = None,
     ):
-        # Mirrors real graph state: format_response._emit appends an AIMessage before
-        # validate_response runs, so messages[-1] is always an AIMessage here.
         if messages is None:
             messages = [HumanMessage("show me issues"), AIMessage(content=final_response)]
         return AgentState(
@@ -632,8 +594,6 @@ class TestValidateResponse:
         nodes._llm.with_structured_output.assert_not_called()
 
     def test_synthesis_validates_against_conversation_history(self, nodes):
-        # synthesis_node sets both results to N/A; validator must NOT short-circuit —
-        # it should call the LLM using conversation history as the grounding context.
         grounded = GroundednessResult(
             score=0.9, is_grounded=True, flagged_claims=[], reasoning="summary matches history"
         )
@@ -657,7 +617,6 @@ class TestValidateResponse:
         assert result["validation_flagged"] is False
 
     def test_synthesis_ungrounded_appends_warning(self, nodes):
-        # If synthesis hallucinates a fact not in the history, the warning must appear.
         ungrounded = GroundednessResult(
             score=0.3,
             is_grounded=False,
@@ -695,7 +654,7 @@ class TestValidateResponse:
         result = nodes.validate_response(state)
         assert result["validation_score"] == 0.95
         assert result["validation_flagged"] is False
-        assert "final_response" not in result  # response unchanged
+        assert "final_response" not in result
 
     def test_ungrounded_response_appends_warning(self, nodes):
         ungrounded = GroundednessResult(
@@ -717,19 +676,17 @@ class TestValidateResponse:
         assert "CVE-2099-99999 was mentioned but not in data" in result["final_response"]
         assert result["final_response"].startswith("The critical issue")
 
-    def test_validation_exception_falls_back_to_pass(self, nodes):
+    def test_validation_exception_reports_unknown_confidence(self, nodes):
         nodes._llm.with_structured_output.return_value.invoke.side_effect = Exception("LLM error")
         state = self._make_state(
             final_response="Some answer.",
-            mcp_result='[get_security_issues]\n[]',
+            mcp_result="[get_security_issues]\n[]",
         )
         result = nodes.validate_response(state)
-        assert result["validation_score"] == 1.0
+        assert result["validation_score"] is None
         assert result["validation_flagged"] is False
 
     def test_warning_fires_when_score_low_despite_is_grounded_true(self, nodes):
-        # Inconsistent LLM output: score says hallucinated, is_grounded says fine.
-        # The code must trust score, not is_grounded, to catch this.
         inconsistent = GroundednessResult(
             score=0.2,
             is_grounded=True,
@@ -739,7 +696,7 @@ class TestValidateResponse:
         nodes._llm.with_structured_output.return_value.invoke.return_value = inconsistent
         state = self._make_state(
             final_response="The issue count is 999.",
-            mcp_result='[get_security_issues]\n[]',
+            mcp_result="[get_security_issues]\n[]",
         )
         result = nodes.validate_response(state)
         assert result["validation_flagged"] is True
@@ -747,15 +704,13 @@ class TestValidateResponse:
         assert result["validation_score"] == 0.2
 
     def test_flagged_response_updates_messages_history(self, nodes):
-        # When validation flags a response, the AIMessage in messages must be updated
-        # so conversation history stays consistent with what the user sees.
         ungrounded = GroundednessResult(
             score=0.3, is_grounded=False, flagged_claims=["fake CVE"], reasoning="not in data"
         )
         nodes._llm.with_structured_output.return_value.invoke.return_value = ungrounded
         state = self._make_state(
             final_response="CVE-9999-9999 is critical.",
-            mcp_result='[get_security_issues]\n[]',
+            mcp_result="[get_security_issues]\n[]",
         )
         original_msg_id = state["messages"][-1].id
         result = nodes.validate_response(state)
@@ -764,12 +719,9 @@ class TestValidateResponse:
         assert len(updated_msgs) == 1
         assert isinstance(updated_msgs[0], AIMessage)
         assert "⚠️" in updated_msgs[0].content
-        # ID must match so LangGraph's add_messages reducer replaces, not appends
         assert updated_msgs[0].id == original_msg_id
 
     def test_skips_when_final_response_empty(self, nodes):
-        # If format_response emitted an empty string, validation should no-op rather than
-        # validating empty content against real context.
         state = self._make_state(
             final_response="",
             mcp_result='[get_security_issues]\n[{"id":"ISS-001","severity":"critical"}]',
@@ -866,50 +818,96 @@ class TestGraphRouting:
         assert "validate_response" in nodes_in_graph
 
     def test_chart_path_bypasses_validate_response(self):
-        # Invoke the chart path end-to-end and confirm validate_response is never called.
         builder = GraphBuilder(llm=MagicMock(), mcp_tools=MagicMock(), retriever=MagicMock())
         validate_mock = MagicMock(return_value={})
         with (
-            patch.object(builder._nodes, "classify_query", MagicMock(return_value={
-                "query_type": "chart", "docs_query": "", "standalone_query": "show chart",
-                "wants_chart": False, "rag_result": "N/A", "mcp_result": "N/A",
-            })),
-            patch.object(builder._nodes, "chart_node", MagicMock(return_value={
-                "final_response": "Chart rendered.",
-                "messages": [AIMessage("Chart rendered.")],
-            })),
+            patch.object(
+                builder._nodes,
+                "classify_query",
+                MagicMock(
+                    return_value={
+                        "query_type": "chart",
+                        "docs_query": "",
+                        "standalone_query": "show chart",
+                        "wants_chart": False,
+                        "rag_result": "N/A",
+                        "mcp_result": "N/A",
+                    }
+                ),
+            ),
+            patch.object(
+                builder._nodes,
+                "chart_node",
+                MagicMock(
+                    return_value={
+                        "final_response": "Chart rendered.",
+                        "messages": [AIMessage("Chart rendered.")],
+                    }
+                ),
+            ),
             patch.object(builder._nodes, "validate_response", validate_mock),
         ):
             app = builder.build(with_memory=False)
         state: AgentState = {
-            "messages": [HumanMessage("show chart")], "query_type": "",
-            "docs_query": "", "mcp_result": "", "rag_result": "", "final_response": "",
+            "messages": [HumanMessage("show chart")],
+            "query_type": "",
+            "docs_query": "",
+            "mcp_result": "",
+            "rag_result": "",
+            "final_response": "",
         }
         app.invoke(state, config={"recursion_limit": 10})
         validate_mock.assert_not_called()
 
     def test_format_response_connects_to_validate_response(self):
-        # Invoke the data path and confirm validate_response is called exactly once.
         builder = GraphBuilder(llm=MagicMock(), mcp_tools=MagicMock(), retriever=MagicMock())
-        validate_mock = MagicMock(return_value={"validation_score": 1.0, "validation_flagged": False})
+        validate_mock = MagicMock(
+            return_value={"validation_score": 1.0, "validation_flagged": False}
+        )
         with (
-            patch.object(builder._nodes, "classify_query", MagicMock(return_value={
-                "query_type": "data", "docs_query": "", "standalone_query": "show issues",
-                "wants_chart": False, "rag_result": "N/A", "mcp_result": "N/A",
-            })),
-            patch.object(builder._nodes, "mcp_node", MagicMock(return_value={
-                "mcp_result": '[get_security_issues]\n[{"id":"ISS-001"}]',
-            })),
-            patch.object(builder._nodes, "format_response", MagicMock(return_value={
-                "final_response": "Found 1 issue.",
-                "messages": [AIMessage("Found 1 issue.")],
-            })),
+            patch.object(
+                builder._nodes,
+                "classify_query",
+                MagicMock(
+                    return_value={
+                        "query_type": "data",
+                        "docs_query": "",
+                        "standalone_query": "show issues",
+                        "wants_chart": False,
+                        "rag_result": "N/A",
+                        "mcp_result": "N/A",
+                    }
+                ),
+            ),
+            patch.object(
+                builder._nodes,
+                "mcp_node",
+                MagicMock(
+                    return_value={
+                        "mcp_result": '[get_security_issues]\n[{"id":"ISS-001"}]',
+                    }
+                ),
+            ),
+            patch.object(
+                builder._nodes,
+                "format_response",
+                MagicMock(
+                    return_value={
+                        "final_response": "Found 1 issue.",
+                        "messages": [AIMessage("Found 1 issue.")],
+                    }
+                ),
+            ),
             patch.object(builder._nodes, "validate_response", validate_mock),
         ):
             app = builder.build(with_memory=False)
         state: AgentState = {
-            "messages": [HumanMessage("show issues")], "query_type": "",
-            "docs_query": "", "mcp_result": "", "rag_result": "", "final_response": "",
+            "messages": [HumanMessage("show issues")],
+            "query_type": "",
+            "docs_query": "",
+            "mcp_result": "",
+            "rag_result": "",
+            "final_response": "",
         }
         app.invoke(state, config={"recursion_limit": 10})
         validate_mock.assert_called_once()

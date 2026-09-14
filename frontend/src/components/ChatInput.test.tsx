@@ -40,9 +40,7 @@ describe('ChatInput', () => {
     const onSend = vi.fn()
     render(<ChatInput onSend={onSend} disabled={false} />)
     const textarea = screen.getByRole('textbox')
-    // Enter on empty textarea
     fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false })
-    // Enter on whitespace-only textarea
     fireEvent.change(textarea, { target: { value: '   ' } })
     fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false })
     expect(onSend).not.toHaveBeenCalled()

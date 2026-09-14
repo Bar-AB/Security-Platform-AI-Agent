@@ -32,7 +32,7 @@ class AgentFactory:
             logger.info("Building RAG index...")
             try:
                 indexer.build_index()
-            except (OSError, RuntimeError):
+            except (OSError, RuntimeError, UnicodeDecodeError):
                 logger.exception("Failed to build RAG index from %s", docs_dir)
                 raise
 

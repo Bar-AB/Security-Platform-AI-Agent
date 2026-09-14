@@ -19,6 +19,116 @@ logger = logging.getLogger(__name__)
 
 
 class AgentNodes:
+    _GROUNDEDNESS_THRESHOLD: float = 0.7
+    _MAX_ACTIVE_ENTITIES = 10
+    _MAX_INJECTED_ENTITIES = 2
+    _CLASSIFIER_RECENT_TURNS = 4
+    _CLASSIFIER_RECENT_CHARS = 1500
+    _CLASSIFIER_OLDER_CHARS = 200
+    _SYNTHESIS_HISTORY_CHARS = 3000
+
+    _AGGREGATION_KEYWORDS = frozenset(
+        [
+            "how many",
+            "how much",
+            "in total",
+            "total",
+            "count",
+            "how much there",
+            "zero vulnerabilities",
+            "zero issues",
+            "zero open issues",
+            "no vulnerabilities",
+            "no issues",
+            "no open issues",
+            "which have zero",
+            "have no issues",
+            "have zero",
+        ]
+    )
+    _GROUP_BY_FIELDS: dict[str, str] = {
+        "by severity": "severity",
+        "per severity": "severity",
+        "severity breakdown": "severity",
+        "severity distribution": "severity",
+        "count by severity": "severity",
+        "by application": "application",
+        "per application": "application",
+        "by service": "application",
+        "per service": "application",
+        "application breakdown": "application",
+        "by category": "category",
+        "per category": "category",
+        "category breakdown": "category",
+        "by status": "status",
+        "per status": "status",
+        "status breakdown": "status",
+    }
+    _FIELD_SPECIFIC_KEYWORDS = frozenset(
+        [
+            "cvss",
+            "cvss score",
+            "risk score",
+            "exploit",
+            "epss",
+            "patch date",
+            "remediation date",
+            "fix date",
+            "cvss vector",
+            "base score",
+        ]
+    )
+
+    _COMPARISON_KEYWORDS = frozenset(
+        [
+            "compare",
+            "vs",
+            "versus",
+            "both",
+            "each",
+            "side by side",
+            "contrast",
+            "how do they",
+            "how do both",
+        ]
+    )
+
+    _CHART_KEYWORDS = frozenset(["chart", "graph", "visualize", "visualization", "plot"])
+    _DATA_ENTITY_KEYWORDS = frozenset(
+        [
+            "issues",
+            "issue",
+            "applications",
+            "apps",
+            "pipeline",
+            "findings",
+            "vulnerabilities",
+            "distribution",
+            "breakdown",
+            "critical",
+            "high",
+            "medium",
+            "low",
+            "open",
+            "resolved",
+            "payment-service",
+            "auth-service",
+            "user-service",
+            "api-gateway",
+            "frontend-app",
+        ]
+    )
+
+    _SEVERITY_ORDER: list[str] = ["critical", "high", "medium", "low"]
+
+    _EMPTY_RESULTS = frozenset(
+        {
+            "N/A",
+            "No relevant documentation found.",
+            "Error retrieving documentation.",
+        }
+    )
+
     def __init__(
         self,
         llm: BaseChatModel,
@@ -40,7 +150,7 @@ class AgentNodes:
         if guard.blocked:
             safe_msg = guard.safe_message
             return {
-                **self._fresh_results("mixed"),
+                **self._reset_turn_results("mixed"),
                 "query_type": "blocked",
                 "docs_query": "",
                 "standalone_query": "",
@@ -52,7 +162,10 @@ class AgentNodes:
             }
 
         history = self._format_history(
-            messages, recent_n=4, recent_max_content=1500, max_content=200
+            messages,
+            recent_n=self._CLASSIFIER_RECENT_TURNS,
+            recent_max_content=self._CLASSIFIER_RECENT_CHARS,
+            max_content=self._CLASSIFIER_OLDER_CHARS,
         )
         wants_chart = any(kw in query.lower() for kw in self._CHART_KEYWORDS)
         current_entities: list[str] = state.get("active_entities") or []
@@ -74,8 +187,8 @@ class AgentNodes:
             standalone = self._enforce_multi_entity(
                 standalone, query, result.active_entities, current_entities
             )
-            # Accumulate entities: new entities take priority (recency-biased), deduped, capped at 10.
-            merged_entities = list(dict.fromkeys(result.active_entities + current_entities))[:10]
+            deduped_entities = list(dict.fromkeys(result.active_entities + current_entities))
+            merged_entities = deduped_entities[: self._MAX_ACTIVE_ENTITIES]
             logger.info(
                 "Classified '%s' as '%s' (standalone: '%s', entities: %s)",
                 query[:50],
@@ -84,7 +197,7 @@ class AgentNodes:
                 merged_entities,
             )
             return {
-                **self._fresh_results(query_type),
+                **self._reset_turn_results(query_type),
                 "query_type": query_type,
                 "docs_query": result.docs_query,
                 "standalone_query": standalone,
@@ -95,7 +208,7 @@ class AgentNodes:
         except Exception:
             logger.exception("Classification failed, defaulting to 'mixed'")
             return {
-                **self._fresh_results("mixed"),
+                **self._reset_turn_results("mixed"),
                 "query_type": "mixed",
                 "docs_query": query,
                 "standalone_query": query,
@@ -105,16 +218,22 @@ class AgentNodes:
             }
 
     @staticmethod
-    def _fresh_results(query_type: str) -> dict:
-        # Wipe per-turn outputs so a node that doesn't run this turn can't leak last turn's
-        # result (state is persisted per thread). The "chart" route is exempt: it reuses the
-        # previous turn's mcp_result ("now chart that").
+    def _reset_turn_results(query_type: str) -> dict:
         if query_type == "chart":
-            return {"rag_result": "N/A", "rag_distances": [], "rag_chunks_returned": 0, "chart_image": None, "group_by_field": None}
+            return {
+                "rag_result": "N/A",
+                "rag_distances": [],
+                "rag_chunks_returned": 0,
+                "chart_image": None,
+                "group_by_field": None,
+            }
         return {
-            "mcp_result": "N/A", "rag_result": "N/A",
-            "rag_distances": [], "rag_chunks_returned": 0,
-            "chart_image": None, "group_by_field": None,
+            "mcp_result": "N/A",
+            "rag_result": "N/A",
+            "rag_distances": [],
+            "rag_chunks_returned": 0,
+            "chart_image": None,
+            "group_by_field": None,
         }
 
     @staticmethod
@@ -125,10 +244,6 @@ class AgentNodes:
         recent_n: int = 0,
         recent_max_content: int = 500,
     ) -> str:
-        # Recency-weighted truncation: when recent_n > 0, the last recent_n messages get
-        # recent_max_content chars while older ones get max_content. This keeps the classifier
-        # prompt small overall while preserving full entity names in the most recent turns.
-        # Synthesis calls pass max_content=3000 with recent_n=0 (flat cap across all turns).
         prior = messages[:-1][-max_messages:]
         recent_cutoff = len(prior) - recent_n if recent_n > 0 else len(prior)
         lines: list[str] = []
@@ -151,22 +266,12 @@ class AgentNodes:
         new_entities: list[str],
         current_entities: list[str],
     ) -> str:
-        """Deterministic guard for multi-entity comparisons.
-
-        When the raw query contains comparison language but the classifier resolved
-        fewer entities than are available in active history, inject the missing entity
-        names into standalone_query so the MCP LLM makes separate tool calls for each.
-        Injects at most 2 missing entities (the dominant "compare both" case).
-        """
         if not any(kw in raw_query.lower() for kw in AgentNodes._COMPARISON_KEYWORDS):
             return standalone
-        missing = [
-            e for e in current_entities
-            if e not in new_entities and e not in standalone
-        ]
+        missing = [e for e in current_entities if e not in new_entities and e not in standalone]
         if not missing:
             return standalone
-        to_inject = missing[:2]
+        to_inject = missing[: AgentNodes._MAX_INJECTED_ENTITIES]
         logger.info("Multi-entity guard: injecting %s into standalone_query", to_inject)
         return standalone + " and " + " and ".join(to_inject)
 
@@ -180,7 +285,9 @@ class AgentNodes:
 
     def synthesis_node(self, state: AgentState) -> dict:
         query = state.get("standalone_query") or cast(str, state["messages"][-1].content)
-        raw_history = self._format_history(state["messages"], max_content=3000)
+        raw_history = self._format_history(
+            state["messages"], max_content=self._SYNTHESIS_HISTORY_CHARS
+        )
         history = InputGuardrail.sanitize_for_xml_context(raw_history, "conversation_history")
         try:
             chain = SYNTHESIS_PROMPT | self._llm
@@ -193,7 +300,9 @@ class AgentNodes:
         except Exception:
             logger.exception("Synthesis node failed for query: %s", query[:50])
             return {
-                **self._emit("Sorry, I could not generate a response from the conversation history."),
+                **self._emit(
+                    "Sorry, I could not generate a response from the conversation history."
+                ),
                 "mcp_result": "N/A",
                 "rag_result": "N/A",
             }
@@ -218,7 +327,8 @@ class AgentNodes:
             "- By CVE ('show CVE-2021-44228'): get_security_issues(cve_id='CVE-...').\n"
             "- By technology keyword ('AWS incidents', 'log4j findings', 'JWT issues'): "
             "use keyword=<term> on whichever tool is relevant.\n"
-            "- By pipeline name ('auth-service-ci findings'): get_pipeline_issues(pipeline='auth-service-ci').\n"
+            "- By pipeline name ('auth-service-ci findings'): "
+            "get_pipeline_issues(pipeline='auth-service-ci').\n"
             "- By pipeline stage ('SAST findings', 'dependency scan results', 'secret scan'): "
             "get_pipeline_issues(stage='sast'|'dependency-scan'|'secret-scan'|'container-scan'|'dast').\n"
             "- By scanner tool ('Trivy findings', 'what did Semgrep find?', 'Gitleaks results'): "
@@ -226,7 +336,8 @@ class AgentNodes:
             "- By branch ('issues on main', 'feature branch findings'): "
             "get_pipeline_issues(branch='main'|'develop'|'feature'). Prefix match is supported.\n\n"
             "DATE QUERIES (use today's date to calculate):\n"
-            "- 'last month': discovered_after=first day of last month, discovered_before=last day of last month.\n"
+            "- 'last month': discovered_after=first day of last month, discovered_before=last day "
+            "of last month.\n"
             "- 'last week': discovered_after=7 days ago.\n"
             "- 'in November 2024': discovered_after='2024-11-01', discovered_before='2024-11-30'.\n"
             "- 'Q4 2024': discovered_after='2024-10-01', discovered_before='2024-12-31'.\n"
@@ -238,20 +349,23 @@ class AgentNodes:
             "Results are pre-sorted by risk score descending.\n"
             "- 'top N highest risk/most severe issues' or 'top N incidents': "
             "get_security_issues(limit=N). Results are pre-sorted by severity (critical first). "
-            "IMPORTANT: security issues do NOT have a risk_score field — use severity as the risk proxy.\n"
+            "IMPORTANT: security issues do NOT have a risk_score field — use severity as the risk "
+            "proxy.\n"
             "- 'top N pipeline findings': get_pipeline_issues(limit=N).\n\n"
             "MULTIPLE SEVERITIES:\n"
             "- 'high and critical issues': make TWO tool calls — one with severity='critical', "
             "one with severity='high' — then combine results in your answer.\n\n"
             "COUNT/TOTAL QUERIES:\n"
             "- When the user asks 'how many', 'how much', 'total', or 'count', always state the "
-            "exact number clearly in your answer (e.g. 'There are 3 issues in auth-service: 1 security issue and 2 pipeline findings.').\n"
+            "exact number clearly in your answer (e.g. 'There are 3 issues in auth-service: 1 "
+            "security issue and 2 pipeline findings.').\n"
             "- Always include ALL statuses (open, in_progress, resolved) in counts unless the user "
             "explicitly asks for open or active issues only.\n"
             "- Never add a limit parameter to any tool call unless the user explicitly specified a "
             "maximum number of results (e.g. 'show me the top 5').\n\n"
             "GENERAL FINDINGS:\n"
-            "- For 'all issues' or unspecific queries: call BOTH get_security_issues AND get_pipeline_issues. "
+            "- For 'all issues' or unspecific queries: call BOTH get_security_issues AND "
+            "get_pipeline_issues. "
             "If the user says 'security issues', call ONLY get_security_issues.\n\n"
             "Never guess or fabricate data. If filters return no results, say so clearly.\n\n"
             "COMPARING MULTIPLE SERVICES: When the query asks to compare, contrast, or show "
@@ -268,14 +382,9 @@ class AgentNodes:
         )
 
     async def mcp_node(self, state: AgentState) -> dict:
-        query = state.get("standalone_query") or cast(
-            str, state["messages"][-1].content
-        )
+        query = state.get("standalone_query") or cast(str, state["messages"][-1].content)
         tools = self._mcp_tools.as_langchain_tools()
 
-        # For group-by aggregation queries, bypass LLM tool-selection entirely.
-        # The LLM tends to add implicit filters (status='open', per-value calls) that
-        # silently drop rows. Fetching both tools with no args guarantees complete data.
         if state.get("group_by_field"):
             try:
                 iss = await self._mcp_tools.get_security_issues()
@@ -287,12 +396,12 @@ class AgentNodes:
 
         try:
             llm_with_tools = self._llm.bind_tools(tools)
-            response = await llm_with_tools.ainvoke(
-                [self._build_mcp_system(), HumanMessage(query)]
-            )
+            response = await llm_with_tools.ainvoke([self._build_mcp_system(), HumanMessage(query)])
             if response.tool_calls:
                 tool_results = await self._execute_tool_calls_async(response.tool_calls)
-                chart_b64 = self._try_generate_chart(tool_results) if state.get("wants_chart") else None
+                chart_b64 = (
+                    self._try_generate_chart(tool_results) if state.get("wants_chart") else None
+                )
                 return {"mcp_result": tool_results, "chart_image": chart_b64}
             return {"mcp_result": response.content, "chart_image": None}
         except Exception:
@@ -327,76 +436,6 @@ class AgentNodes:
                 "rag_chunks_returned": 0,
             }
 
-    _GROUNDEDNESS_THRESHOLD: float = 0.7
-
-    _AGGREGATION_KEYWORDS = frozenset([
-        "how many", "how much", "in total", "total", "count", "how much there",
-        "zero vulnerabilities", "zero issues", "zero open issues",
-        "no vulnerabilities", "no issues", "no open issues",
-        "which have zero", "have no issues", "have zero",
-    ])
-    # Maps query phrases to the JSON field to group by. Detected once in classify_query
-    # and stored in state so mcp_node and format_response don't duplicate the logic.
-    _GROUP_BY_FIELDS: dict[str, str] = {
-        "by severity": "severity",       "per severity": "severity",
-        "severity breakdown": "severity", "severity distribution": "severity",
-        "count by severity": "severity",
-        "by application": "application",  "per application": "application",
-        "by service": "application",      "per service": "application",
-        "application breakdown": "application",
-        "by category": "category",        "per category": "category",
-        "category breakdown": "category",
-        "by status": "status",            "per status": "status",
-        "status breakdown": "status",
-    }
-    _FIELD_SPECIFIC_KEYWORDS = frozenset([
-        "cvss", "cvss score", "risk score", "exploit", "epss", "patch date",
-        "remediation date", "fix date", "cvss vector", "base score",
-    ])
-
-    _COMPARISON_KEYWORDS = frozenset([
-        "compare", "vs", "versus", "both", "each", "side by side",
-        "contrast", "how do they", "how do both",
-    ])
-
-    _CHART_KEYWORDS = frozenset(
-        ["chart", "graph", "visualize", "visualization", "plot"]
-    )
-    # If the LLM misclassifies a data+chart query as "chart", these words signal fresh data is needed.
-    _DATA_ENTITY_KEYWORDS = frozenset(
-        [
-            "issues",
-            "issue",
-            "applications",
-            "apps",
-            "pipeline",
-            "findings",
-            "vulnerabilities",
-            "distribution",
-            "breakdown",
-            "critical",
-            "high",
-            "medium",
-            "low",
-            "open",
-            "resolved",
-            "payment-service",
-            "auth-service",
-            "user-service",
-            "api-gateway",
-            "frontend-app",
-        ]
-    )
-
-    _SEVERITY_ORDER: list[str] = ["critical", "high", "medium", "low"]
-
-    # rag_node returns these strings when there is nothing useful to pass to the formatter.
-    _EMPTY_RESULTS = frozenset({
-        "N/A",
-        "No relevant documentation found.",
-        "Error retrieving documentation.",
-    })
-
     @staticmethod
     def _count_by_field(mcp_result: str, field: str) -> str | None:
         counts: dict[str, list[str]] = defaultdict(list)
@@ -430,7 +469,9 @@ class AgentNodes:
             if field == "severity"
             else sorted(counts)
         )
-        lines: list[str] = [f"Based on the provided data, here are the counts of issues by {field}:\n"]
+        lines: list[str] = [
+            f"Based on the provided data, here are the counts of issues by {field}:\n"
+        ]
         summary: list[str] = []
         for key in keys:
             items_for_key = counts[key]
@@ -444,32 +485,29 @@ class AgentNodes:
         return "\n".join(lines)
 
     def format_response(self, state: AgentState) -> dict:
-        query = state.get("standalone_query") or cast(
-            str, state["messages"][-1].content
-        )
+        query = state.get("standalone_query") or cast(str, state["messages"][-1].content)
         mcp_result = state.get("mcp_result") or "N/A"
         rag_result = state.get("rag_result") or "N/A"
         try:
             is_aggregation = any(kw in query.lower() for kw in self._AGGREGATION_KEYWORDS)
-            # No context from either source — don't let the LLM answer from training data.
             if mcp_result in self._EMPTY_RESULTS and rag_result in self._EMPTY_RESULTS:
                 return self._emit(
                     "I don't have information about that in the platform's documentation "
                     "or security data. Try asking about connectors, dashboards, security "
                     "issues, applications, or pipeline findings."
                 )
-            # Deterministic group-by path: avoids LLM excluding rows or miscounting.
             group_by_field = state.get("group_by_field")
             if group_by_field and rag_result == "N/A" and mcp_result != "N/A":
                 det = self._count_by_field(mcp_result, group_by_field)
                 if det:
                     return self._emit(det)
-            # Render pure data deterministically so no rows get dropped; other aggregation
-            # queries and field-specific queries go through the LLM to synthesize a response.
-            # Field-specific queries (asking for a named attribute) need the LLM so it can
-            # explicitly state when a field is absent rather than silently showing adjacent data.
             is_field_specific = any(kw in query.lower() for kw in self._FIELD_SPECIFIC_KEYWORDS)
-            if rag_result == "N/A" and mcp_result != "N/A" and not is_aggregation and not is_field_specific:
+            if (
+                rag_result == "N/A"
+                and mcp_result != "N/A"
+                and not is_aggregation
+                and not is_field_specific
+            ):
                 return self._emit(self._format_mcp_as_markdown(mcp_result))
             response = self._formatter.invoke(
                 {
@@ -486,7 +524,6 @@ class AgentNodes:
 
     @staticmethod
     def _emit(text: str) -> dict:
-        # Append the answer as an AIMessage so the next turn's classifier sees it for follow-ups.
         return {"final_response": text, "messages": [AIMessage(content=text)]}
 
     def chart_node(self, state: AgentState) -> dict:
@@ -503,8 +540,6 @@ class AgentNodes:
 
     @staticmethod
     def _build_sources_footer(rag_result: str) -> str:
-        # The LLM formatter doesn't reliably echo the retriever's "[source — section]" prefixes,
-        # so extract them and append a deterministic Sources line.
         if rag_result == "N/A":
             return ""
         sources: list[str] = []
@@ -534,9 +569,7 @@ class AgentNodes:
             if not items:
                 sections.append(f"**{tool_name}:** No results found.")
                 continue
-            lines = [
-                f"**{tool_name}** — {len(items)} result{'s' if len(items) != 1 else ''}:\n"
-            ]
+            lines = [f"**{tool_name}** — {len(items)} result{'s' if len(items) != 1 else ''}:\n"]
             for idx, item in enumerate(items, 1):
                 fields = "  \n".join(
                     f"  - **{k.replace('_', ' ').title()}**: {v}"
@@ -589,17 +622,18 @@ class AgentNodes:
         query_type = state.get("query_type", "")
         is_synthesis = query_type == "synthesis" and mcp_result == "N/A" and rag_result == "N/A"
 
-        # Nothing to validate against — skip (non-synthesis path only)
         if mcp_result == "N/A" and rag_result == "N/A" and not is_synthesis:
             return {"validation_score": 1.0, "validation_flagged": False}
 
-        # Guard: if no response was emitted, there's nothing to validate
         if not response:
             return {"validation_score": 1.0, "validation_flagged": False}
 
         if is_synthesis:
-            raw_history = self._format_history(state["messages"][:-1], max_content=3000)
-            context = f"Conversation History:\n{InputGuardrail.sanitize_for_xml_context(raw_history, 'context')}"
+            raw_history = self._format_history(
+                state["messages"][:-1], max_content=self._SYNTHESIS_HISTORY_CHARS
+            )
+            safe_history = InputGuardrail.sanitize_for_xml_context(raw_history, "context")
+            context = f"Conversation History:\n{safe_history}"
         else:
             context = (
                 f"MCP Data:\n{InputGuardrail.sanitize_for_xml_context(mcp_result, 'context')}\n\n"
@@ -609,7 +643,9 @@ class AgentNodes:
             validator = self._llm.with_structured_output(GroundednessResult)
             result = cast(
                 GroundednessResult,
-                validator.invoke(VALIDATOR_PROMPT.invoke({"context": context, "response": response})),
+                validator.invoke(
+                    VALIDATOR_PROMPT.invoke({"context": context, "response": response})
+                ),
             )
             logger.info(
                 "Groundedness score=%.2f is_grounded=%s flagged=%d claim(s) — %s",
@@ -618,8 +654,6 @@ class AgentNodes:
                 len(result.flagged_claims),
                 result.reasoning,
             )
-            # Guard on score directly — don't trust is_grounded alone; an inconsistent
-            # LLM response (e.g. score=0.2, is_grounded=True) should still trigger the warning.
             is_flagged = not result.is_grounded or result.score < self._GROUNDEDNESS_THRESHOLD
             if is_flagged:
                 flagged_lines = "\n".join(f"  • {c}" for c in result.flagged_claims)
@@ -630,9 +664,6 @@ class AgentNodes:
                 if result.flagged_claims:
                     warning += f"\n> Unverified:\n{flagged_lines}"
                 warned_text = response + warning
-                # Replace the AIMessage committed by format_response so conversation history
-                # stays consistent with what the user sees. LangGraph's add_messages reducer
-                # replaces an existing message when the returned message shares its ID.
                 last_msg = state["messages"][-1]
                 updated_msg = AIMessage(content=warned_text, id=last_msg.id)
                 return {
@@ -643,18 +674,18 @@ class AgentNodes:
                 }
             return {"validation_score": result.score, "validation_flagged": False}
         except Exception:
-            logger.exception("Response validation failed — skipping")
-            return {"validation_score": 1.0, "validation_flagged": False}
+            logger.exception("Response validation failed — confidence unknown")
+            return {"validation_score": None, "validation_flagged": False}
 
     async def _execute_tool_calls_async(self, tool_calls: list) -> str:
-        _TOOL_MAP = {
+        tool_map = {
             "get_security_issues": self._mcp_tools.get_security_issues,
             "get_applications": self._mcp_tools.get_applications,
             "get_pipeline_issues": self._mcp_tools.get_pipeline_issues,
         }
 
         async def _run_one(call: dict) -> str | None:
-            fn = _TOOL_MAP.get(call["name"])
+            fn = tool_map.get(call["name"])
             if not fn:
                 return None
             try:

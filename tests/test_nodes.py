@@ -1,6 +1,7 @@
 import json
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
 from agent.nodes import AgentNodes
@@ -75,7 +76,6 @@ class TestClassifyQuery:
         assert result["standalone_query"] == resolved
 
     def test_chart_override_when_data_entities_present(self, nodes, llm):
-        # LLM returns "chart" but query contains data entities → override to "data"
         query = "show me the issues as a chart"
         llm.with_structured_output.return_value.invoke.return_value = QueryClassification(
             query_type="chart",
@@ -177,7 +177,6 @@ class TestValidateResponse:
         assert "Validation warning" in result["final_response"]
 
     def test_flags_when_is_grounded_false_despite_score(self, nodes, llm):
-        # Score says OK but is_grounded=False — should still flag
         llm.with_structured_output.return_value.invoke.return_value = GroundednessResult(
             score=0.8,
             is_grounded=False,
@@ -192,7 +191,7 @@ class TestValidateResponse:
         llm.with_structured_output.return_value.invoke.side_effect = RuntimeError("timeout")
         state = self._state("Some response.", mcp="some data")
         result = nodes.validate_response(state)
-        assert result["validation_score"] == 1.0
+        assert result["validation_score"] is None
         assert result["validation_flagged"] is False
 
 
@@ -210,7 +209,12 @@ class TestCountByField:
         issues = [
             {"id": "ISS-001", "title": "SQL Injection", "severity": "critical"},
             {"id": "ISS-002", "title": "XSS", "severity": "high"},
-            {"id": "ISS-007", "title": "Command injection", "severity": "high", "status": "resolved"},
+            {
+                "id": "ISS-007",
+                "title": "Command injection",
+                "severity": "high",
+                "status": "resolved",
+            },
         ]
         pipeline = [
             {"id": "PIPE-001", "title": "Log4j", "severity": "critical"},
@@ -248,7 +252,9 @@ class TestCountByField:
         assert critical_pos < medium_pos < low_pos
 
     def test_includes_resolved_issues(self, nodes):
-        issues = [{"id": "ISS-007", "title": "Resolved issue", "severity": "high", "status": "resolved"}]
+        issues = [
+            {"id": "ISS-007", "title": "Resolved issue", "severity": "high", "status": "resolved"}
+        ]
         result = nodes._count_by_field(self._make_mcp_result(issues, []), "severity")
         assert result is not None
         assert "1 high" in result
@@ -299,8 +305,6 @@ class TestDetectGroupBy:
 
 
 class TestPromptHardening:
-    """Verify prompts wrap untrusted data in XML tags and carry SECURITY BOUNDARY instructions."""
-
     def test_formatter_prompt_has_security_boundary(self):
         system_msg = FORMATTER_PROMPT.messages[0].prompt.template
         assert "SECURITY BOUNDARY" in system_msg

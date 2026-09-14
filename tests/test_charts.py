@@ -1,11 +1,14 @@
 import base64
-import pytest
 from unittest.mock import patch
+
+import pytest
 
 from agent.charts import SecurityCharts
 
 
 class TestSecurityCharts:
+    PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+
     @pytest.fixture
     def charts(self):
         return SecurityCharts()
@@ -15,7 +18,7 @@ class TestSecurityCharts:
         result = charts.severity_distribution(issues)
         assert isinstance(result, str)
         decoded = base64.b64decode(result)
-        assert decoded[:8] == b"\x89PNG\r\n\x1a\n"  # PNG magic bytes
+        assert decoded.startswith(self.PNG_SIGNATURE)
 
     def test_severity_distribution_counts_all_levels(self, charts):
         issues = [
@@ -31,9 +34,8 @@ class TestSecurityCharts:
             ax = fig.axes[0]
             bars = ax.patches
             heights = [b.get_height() for b in bars]
-            assert heights[0] == 2  # critical
-            assert heights[1] == 1  # high
-            assert heights[3] == 1  # low
+            critical, high, _medium, low = heights
+            assert (critical, high, low) == (2, 1, 1)
 
     def test_top_vulnerable_apps_returns_base64(self, charts):
         apps = [
@@ -43,7 +45,7 @@ class TestSecurityCharts:
         result = charts.top_vulnerable_apps(apps)
         assert isinstance(result, str)
         decoded = base64.b64decode(result)
-        assert decoded[:8] == b"\x89PNG\r\n\x1a\n"
+        assert decoded.startswith(self.PNG_SIGNATURE)
 
     def test_top_vulnerable_apps_sorted_descending(self, charts):
         apps = [

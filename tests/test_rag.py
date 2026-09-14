@@ -1,6 +1,7 @@
 import logging
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from rag.indexer import RAGIndexer
 from rag.retriever import RAGRetriever
@@ -11,7 +12,8 @@ class TestRAGIndexer:
     def docs_dir(self, tmp_path):
         md = tmp_path / "test.md"
         md.write_text(
-            "# Section One\n\nThis explains connector setup.\n\n## Jira\n\nJira integration steps here."
+            "# Section One\n\nThis explains connector setup.\n\n## Jira\n\nJira integration steps "
+            "here."
         )
         return str(tmp_path)
 
@@ -35,6 +37,14 @@ class TestRAGIndexer:
             docs = indexer._load_documents()
             assert len(docs) >= 1
             assert any("connector" in d.page_content.lower() for d in docs)
+
+    def test_indexer_loads_utf8_markdown_with_file_name_source(self, tmp_path, chroma_dir):
+        content = "# Jira — Setup\n\nClick “Connect” ✓"
+        (tmp_path / "utf8.md").write_text(content, encoding="utf-8")
+        with patch("rag.indexer.OpenAIEmbeddings"):
+            indexer = RAGIndexer(docs_dir=str(tmp_path), persist_dir=chroma_dir)
+            docs = indexer._load_documents()
+        assert [(d.page_content, d.metadata) for d in docs] == [(content, {"source": "utf8.md"})]
 
 
 class TestRAGRetriever:
@@ -88,7 +98,7 @@ class TestRAGRetriever:
         high_distance_collection.query.return_value = {
             "documents": [["Totally unrelated content about cooking recipes."]],
             "metadatas": [[{"source": "connectors.md"}]],
-            "distances": [[0.85]],  # above threshold — should be filtered
+            "distances": [[0.85]],
         }
         with (
             patch("rag.retriever.OpenAIEmbeddings") as mock_emb,
@@ -111,15 +121,14 @@ class TestRAGRetriever:
             mock_client.return_value.get_collection.return_value = mock_collection
             retriever = RAGRetriever(persist_dir="/tmp/fake", distance_threshold=0.5)
             results = retriever.retrieve("Jira setup")
-            assert len(results) == 1  # distance 0.12 is within threshold
+            assert len(results) == 1
 
     def test_retriever_keeps_chunk_at_exact_threshold(self):
-        # distance == threshold is NOT filtered (strictly greater-than comparison)
         at_threshold_collection = MagicMock()
         at_threshold_collection.query.return_value = {
             "documents": [["Some content at the boundary."]],
             "metadatas": [[{"source": "connectors.md"}]],
-            "distances": [[0.5]],  # exactly at threshold — should be kept
+            "distances": [[0.5]],
         }
         with (
             patch("rag.retriever.OpenAIEmbeddings") as mock_emb,
@@ -133,12 +142,10 @@ class TestRAGRetriever:
         assert results[0].metadata["distance"] == 0.5
 
     def test_retriever_passes_chunks_when_distances_absent(self):
-        # Defensive fallback: when Chroma omits distances, chunks default to 0.0 and pass through.
         no_distances_collection = MagicMock()
         no_distances_collection.query.return_value = {
             "documents": [["Some content."]],
             "metadatas": [[{"source": "connectors.md"}]],
-            # "distances" key absent
         }
         with (
             patch("rag.retriever.OpenAIEmbeddings") as mock_emb,

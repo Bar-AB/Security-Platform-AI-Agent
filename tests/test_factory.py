@@ -1,5 +1,6 @@
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 import agent.factory as _factory_module
 from agent.factory import AgentFactory
@@ -66,3 +67,21 @@ class TestAgentFactory:
             AgentFactory.build()
             _, kwargs = mock_retriever.call_args
             assert kwargs.get("distance_threshold") == pytest.approx(0.3)
+
+    def test_build_logs_and_raises_when_docs_are_not_utf8(self):
+        with (
+            patch.object(_factory_module, "RAGIndexer") as mock_idx,
+            patch.object(_factory_module, "MultiQueryRAGRetriever"),
+            patch.object(_factory_module, "MCPClient"),
+            patch.object(_factory_module, "SecurityMCPTools"),
+            patch.object(_factory_module, "ChatOpenAI"),
+            patch.object(_factory_module, "GraphBuilder"),
+            patch.object(_factory_module.logger, "exception") as mock_log,
+        ):
+            mock_idx.return_value.is_indexed.return_value = False
+            mock_idx.return_value.build_index.side_effect = UnicodeDecodeError(
+                "utf-8", b"\x9c", 0, 1, "invalid start byte"
+            )
+            with pytest.raises(UnicodeDecodeError):
+                AgentFactory.build()
+            mock_log.assert_called_once()

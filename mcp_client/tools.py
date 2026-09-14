@@ -1,13 +1,10 @@
 import json
-import logging
 from typing import Any
 
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
 from mcp_client.client import MCPClient
-
-logger = logging.getLogger(__name__)
 
 
 class _GetIssuesInput(BaseModel):
@@ -19,18 +16,23 @@ class _GetIssuesInput(BaseModel):
     )
     category: str | None = Field(
         None,
-        description="Filter by category: injection, xss, broken_auth, exposed_data, misconfig, dependency",
+        description=(
+            "Filter by category: injection, xss, broken_auth, exposed_data, misconfig, dependency"
+        ),
     )
-    status: str | None = Field(
-        None, description="Filter by status: open, in_progress, resolved"
-    )
+    status: str | None = Field(None, description="Filter by status: open, in_progress, resolved")
     application: str | None = Field(
         None,
-        description="Filter by application/service name (e.g. 'payment-service', 'auth-service', 'user-service')",
+        description=(
+            "Filter by application/service name (e.g. 'payment-service', 'auth-service', "
+            "'user-service')"
+        ),
     )
     keyword: str | None = Field(
         None,
-        description="Case-insensitive substring match on issue title (e.g. 'SQL', 'JWT', 'log4j', 'S3')",
+        description=(
+            "Case-insensitive substring match on issue title (e.g. 'SQL', 'JWT', 'log4j', 'S3')"
+        ),
     )
     cve_id: str | None = Field(
         None, description="Exact CVE identifier to look up (e.g. 'CVE-2021-44228')"
@@ -41,7 +43,10 @@ class _GetIssuesInput(BaseModel):
     )
     discovered_before: str | None = Field(
         None,
-        description="Return issues discovered on or before this ISO date (YYYY-MM-DD). Combine with discovered_after for a date range.",
+        description=(
+            "Return issues discovered on or before this ISO date (YYYY-MM-DD). Combine with "
+            "discovered_after for a date range."
+        ),
     )
     limit: int | None = Field(None, description="Maximum number of results to return")
 
@@ -49,7 +54,9 @@ class _GetIssuesInput(BaseModel):
 class _GetApplicationsInput(BaseModel):
     min_risk_score: float | None = Field(
         None,
-        description="Minimum risk score (0-10). Results are always sorted by risk score descending.",
+        description=(
+            "Minimum risk score (0-10). Results are always sorted by risk score descending."
+        ),
     )
     limit: int | None = Field(
         None,
@@ -66,23 +73,37 @@ class _GetPipelineIssuesInput(BaseModel):
     )
     pipeline: str | None = Field(
         None,
-        description="Filter by CI/CD pipeline name (e.g. 'auth-service-ci', 'payment-service-ci'). Use '<service>-ci' pattern for a specific service.",
+        description=(
+            "Filter by CI/CD pipeline name (e.g. 'auth-service-ci', 'payment-service-ci'). Use "
+            "'<service>-ci' pattern for a specific service."
+        ),
     )
     stage: str | None = Field(
         None,
-        description="Filter by pipeline stage (e.g. 'sast', 'dependency-scan', 'secret-scan', 'container-scan', 'dast')",
+        description=(
+            "Filter by pipeline stage (e.g. 'sast', 'dependency-scan', 'secret-scan', "
+            "'container-scan', 'dast')"
+        ),
     )
     tool: str | None = Field(
         None,
-        description="Filter by scanner tool name (e.g. 'Trivy', 'Semgrep', 'Gitleaks', 'OWASP ZAP')",
+        description=(
+            "Filter by scanner tool name (e.g. 'Trivy', 'Semgrep', 'Gitleaks', 'OWASP ZAP')"
+        ),
     )
     branch: str | None = Field(
         None,
-        description="Filter by git branch; prefix match supported (e.g. 'feature' matches 'feature/login-refactor')",
+        description=(
+            "Filter by git branch; prefix match supported (e.g. 'feature' matches "
+            "'feature/login-refactor')"
+        ),
     )
     keyword: str | None = Field(
         None,
-        description="Case-insensitive substring match on finding title (e.g. 'AWS', 'secret', 'log4j', 'JWT')",
+        description=(
+            "Case-insensitive substring match on finding title (e.g. 'AWS', 'secret', 'log4j', "
+            "'JWT')"
+        ),
     )
     detected_after: str | None = Field(
         None,
@@ -90,7 +111,10 @@ class _GetPipelineIssuesInput(BaseModel):
     )
     detected_before: str | None = Field(
         None,
-        description="Return findings detected on or before this ISO date (YYYY-MM-DD). Combine with detected_after for a date range.",
+        description=(
+            "Return findings detected on or before this ISO date (YYYY-MM-DD). Combine with "
+            "detected_after for a date range."
+        ),
     )
     limit: int | None = Field(None, description="Maximum number of results to return")
 
@@ -100,11 +124,7 @@ class SecurityMCPTools:
         self._client = client
 
     async def _async_call(self, tool_name: str, args: dict[str, Any]) -> str:
-        try:
-            results = await self._client.call_tool(tool_name, args)
-        except Exception:
-            logger.exception("Async MCP tool call failed: %s", tool_name)
-            return "[]"
+        results = await self._client.call_tool(tool_name, args)
         if not results:
             return "[]"
         return json.dumps(results, indent=2)
@@ -185,7 +205,8 @@ class SecurityMCPTools:
                 description=(
                     "Fetch security issues. Supports filtering by severity, category, status, "
                     "application/service name, keyword (title search), cve_id (exact CVE lookup), "
-                    "discovered_after and discovered_before (date range). Use limit for 'top N' queries."
+                    "discovered_after and discovered_before (date range). Use limit for 'top N' "
+                    "queries."
                 ),
                 args_schema=_GetIssuesInput,
             ),

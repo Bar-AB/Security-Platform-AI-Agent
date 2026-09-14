@@ -31,7 +31,6 @@ class InputGuardrail:
             r"\|im_start\|",
             r"override\s+(your\s+)?(instructions?|training|rules?|safety)",
             r"bypass\s+(your\s+)?(instructions?|training|safety|filter)",
-            # Narrow DAN to injection-context usage only to avoid blocking normal names
             r"(?:you\s+are|act\s+as)\s+DAN\b",
         ]
     )
@@ -52,11 +51,6 @@ class InputGuardrail:
 
     @staticmethod
     def sanitize_for_xml_context(text: str, *tag_names: str) -> str:
-        """Neutralize XML closing tags to prevent tag-breakout in prompt templates.
-
-        Replaces '</tag>' with '&lt;/tag&gt;' for each named tag, so injected closing
-        sequences can't escape the delimiter that bounds untrusted data.
-        """
         result = text
         for tag in tag_names:
             result = result.replace(f"</{tag}>", f"&lt;/{tag}&gt;")
