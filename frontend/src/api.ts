@@ -23,7 +23,7 @@ function parseSseLine(line: string): StreamEvent | null {
   }
 }
 
-function isAbortError(err: unknown): boolean {
+export function isAbortError(err: unknown): boolean {
   return typeof err === 'object' && err !== null && (err as { name?: string }).name === 'AbortError'
 }
 

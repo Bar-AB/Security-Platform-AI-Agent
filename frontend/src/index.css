@@ -1,17 +1,243 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 
+@theme {
+  --color-canvas: #060a12;
+  --color-surface: #0d1422;
+  --color-surface-2: #151e30;
+  --color-line: #1f2a3f;
+  --color-ink: #e3eaf5;
+  --color-muted: #8392ab;
+  --color-accent: #22d3ee;
+  --color-accent-strong: #67e8f9;
+  --color-ok: #34d399;
+  --color-violet: #a78bfa;
+  --color-sev-critical: #f87171;
+  --color-sev-high: #fb923c;
+  --color-sev-medium: #fbbf24;
+  --color-sev-low: #60a5fa;
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+}
+
+html,
+body {
+  background-color: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  color-scheme: dark;
+}
+
+body {
+  background-image:
+    radial-gradient(ellipse 60% 40% at 50% -10%, rgb(34 211 238 / 0.12), transparent 70%),
+    radial-gradient(ellipse 40% 30% at 100% 100%, rgb(167 139 250 / 0.06), transparent 70%),
+    linear-gradient(rgb(148 163 184 / 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(148 163 184 / 0.035) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 100%, 32px 32px, 32px 32px;
+  background-attachment: fixed;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--color-line);
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: var(--color-muted);
+}
+
+.focus-ring:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.brand-mark {
+  background: linear-gradient(135deg, var(--color-accent-strong), var(--color-accent) 55%, #0891b2);
+  box-shadow: 0 0 18px -2px rgb(34 211 238 / 0.55);
+}
+
+.hero-glow {
+  box-shadow:
+    0 0 0 6px rgb(34 211 238 / 0.05),
+    0 0 48px -4px rgb(34 211 238 / 0.45);
+  animation: glow 4s ease-in-out infinite;
+}
+
+.avatar-glow {
+  box-shadow: 0 0 14px -4px rgb(34 211 238 / 0.6);
+}
+
+.composer:focus-within {
+  border-color: rgb(34 211 238 / 0.55);
+  box-shadow:
+    0 0 0 3px rgb(34 211 238 / 0.12),
+    0 0 32px -8px rgb(34 211 238 / 0.45);
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  border-radius: 999px;
+  padding: 0.15rem 0.55rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.markdown {
+  --tw-prose-body: var(--color-ink);
+  --tw-prose-invert-body: var(--color-ink);
+  --tw-prose-invert-headings: #f8fafc;
+  --tw-prose-invert-links: var(--color-accent);
+  --tw-prose-invert-bold: #f8fafc;
+  --tw-prose-invert-bullets: var(--color-accent);
+  --tw-prose-invert-counters: var(--color-muted);
+  --tw-prose-invert-code: var(--color-accent-strong);
+  --tw-prose-invert-hr: var(--color-line);
+  --tw-prose-invert-quotes: var(--color-muted);
+  --tw-prose-invert-quote-borders: var(--color-accent);
+  --tw-prose-invert-th-borders: var(--color-line);
+  --tw-prose-invert-td-borders: var(--color-line);
+}
+
+.markdown > :first-child {
+  margin-top: 0;
+}
+
+.markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown :not(pre) > code {
+  border-radius: 0.3rem;
+  background: var(--color-surface-2);
+  padding: 0.1rem 0.35rem;
+  font-weight: 500;
+}
+
+.markdown :not(pre) > code::before,
+.markdown :not(pre) > code::after {
+  content: none;
+}
+
+.markdown pre {
+  border: 1px solid var(--color-line);
+  border-radius: 0.6rem;
+  background: var(--color-canvas);
+  font-family: var(--font-mono);
+}
+
+.markdown .table-scroll {
+  margin: 1em 0;
+  overflow-x: auto;
+  border: 1px solid var(--color-line);
+  border-radius: 0.6rem;
+}
+
+.markdown .table-scroll table {
+  margin: 0;
+  min-width: 100%;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.markdown .table-scroll thead {
+  background: var(--color-surface-2);
+}
+
+.markdown .table-scroll th,
+.markdown .table-scroll td {
+  padding: 0.5rem 0.75rem;
+}
+
+.markdown .table-scroll tbody tr:nth-child(even) {
+  background: rgb(21 30 48 / 0.45);
+}
+
 @keyframes blink {
   0%, 100% { opacity: 1; }
   50% { opacity: 0; }
+}
+
+@keyframes glow {
+  0%, 100% { box-shadow: 0 0 0 6px rgb(34 211 238 / 0.05), 0 0 40px -6px rgb(34 211 238 / 0.35); }
+  50% { box-shadow: 0 0 0 8px rgb(34 211 238 / 0.08), 0 0 56px -2px rgb(34 211 238 / 0.55); }
+}
+
+@keyframes pulse-ring {
+  0% { transform: scale(1); opacity: 0.75; }
+  100% { transform: scale(2.6); opacity: 0; }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes typing {
+  0%, 80%, 100% { opacity: 0.25; transform: translateY(0); }
+  40% { opacity: 1; transform: translateY(-2px); }
+}
+
+@keyframes message-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .streaming-cursor {
   display: inline-block;
   width: 2px;
   height: 0.9em;
-  background: currentColor;
+  background: var(--color-accent);
   margin-left: 1px;
   vertical-align: text-bottom;
   animation: blink 1s step-start infinite;
+}
+
+.pulse-ring {
+  animation: pulse-ring 1.8s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+.spinner {
+  animation: spin 0.8s linear infinite;
+}
+
+.typing-dot {
+  animation: typing 1.2s ease-in-out infinite;
+}
+
+.message-enter {
+  animation: message-in 0.25s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .spinner {
+    animation: none;
+  }
 }

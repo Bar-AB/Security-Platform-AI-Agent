@@ -36,6 +36,11 @@ describe('ChatInput', () => {
     expect(screen.getByRole('button', { name: /send/i })).toBeDisabled()
   })
 
+  it('shows the keyboard hint', () => {
+    render(<ChatInput onSend={vi.fn()} disabled={false} />)
+    expect(screen.getByText(/Enter to send · Shift\+Enter for newline/)).toBeInTheDocument()
+  })
+
   it('does not call onSend when input is empty or whitespace', () => {
     const onSend = vi.fn()
     render(<ChatInput onSend={onSend} disabled={false} />)

@@ -2,21 +2,38 @@ import { useState, useRef, useEffect } from 'react'
 import { ChatMessage } from './components/ChatMessage'
 import { ChatInput } from './components/ChatInput'
 import { TypingIndicator } from './components/TypingIndicator'
+import { Sidebar } from './components/Sidebar'
+import { EmptyState } from './components/EmptyState'
+import { StatusIndicator, type StreamOutcome } from './components/StatusIndicator'
+import { PlusIcon, ShieldIcon } from './components/Icons'
 import { streamMessage } from './api'
 import type { StreamDoneEvent } from './api'
 import type { Message, QueryType } from './types'
 
-const THREAD_ID = crypto.randomUUID()
+const CONNECTIVITY_ERROR_PATTERN = /^(HTTP \d+|Network error|Request timed out|Stream ended unexpectedly)$/
 
 export default function App() {
   const [messages, setMessages] = useState<Message[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [streamingStatus, setStreamingStatus] = useState<string | null>(null)
+  const [streamOutcome, setStreamOutcome] = useState<StreamOutcome | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const threadIdRef = useRef<string>(crypto.randomUUID())
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'instant' })
   }, [messages])
+
+  const handleNewChat = () => {
+    if (isLoading) return
+    threadIdRef.current = crypto.randomUUID()
+    setMessages([])
+    setStreamingStatus(null)
+  }
+
+  const reportStreamOutcome = (isOk: boolean) => {
+    setStreamOutcome(prev => ({ isOk, seq: (prev?.seq ?? 0) + 1 }))
+  }
 
   const handleSend = async (text: string) => {
     const userMsg: Message = {
@@ -40,7 +57,7 @@ export default function App() {
 
     await streamMessage(
       text,
-      THREAD_ID,
+      threadIdRef.current,
       (token) => {
         if (!statusCleared) {
           statusCleared = true
@@ -78,6 +95,7 @@ export default function App() {
               : m
           )
         )
+        reportStreamOutcome(true)
         setIsLoading(false)
       },
       (errMsg) => {
@@ -89,10 +107,11 @@ export default function App() {
         setMessages(prev =>
           prev.map(m =>
             m.id === assistantId
-              ? { ...m, content: `Error: ${errMsg}`, isStreaming: false }
+              ? { ...m, content: `Error: ${errMsg}`, isStreaming: false, isError: true }
               : m
           )
         )
+        if (CONNECTIVITY_ERROR_PATTERN.test(errMsg)) reportStreamOutcome(false)
         setIsLoading(false)
       },
       (statusText: string) => {
@@ -101,71 +120,64 @@ export default function App() {
     )
   }
 
+  const isAwaitingFirstToken =
+    isLoading && !messages.some(m => m.isStreaming && m.content.length > 0)
+
   return (
-    <div className="flex flex-col h-full max-w-3xl mx-auto">
-      <header className="flex items-center gap-3 px-6 py-4 border-b border-[#30363d]">
-        <div className="w-8 h-8 rounded-lg bg-[#1f6feb] flex items-center justify-center text-white font-bold text-sm select-none">
-          S
+    <div className="flex h-full flex-col">
+      <header className="relative z-10 flex items-center gap-3 border-b border-line bg-canvas/80 px-4 py-3 backdrop-blur sm:px-6">
+        <div className="brand-mark flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-canvas">
+          <ShieldIcon size={20} strokeWidth={2.2} />
         </div>
-        <div>
-          <h1 className="text-[#e6edf3] font-semibold text-sm">Security AI Agent</h1>
-          <p className="text-[#484f58] text-xs">Powered by GPT-4o · LangGraph · RAG</p>
+        <div className="min-w-0">
+          <h1 className="truncate text-sm font-semibold tracking-tight text-ink">Security AI Agent</h1>
+          <p className="hidden truncate text-xs text-muted sm:block">
+            Security operations console · LangGraph · MCP · RAG
+          </p>
+        </div>
+        <div className="ml-auto flex items-center gap-2">
+          <StatusIndicator streamOutcome={streamOutcome} />
+          <button
+            type="button"
+            onClick={handleNewChat}
+            disabled={isLoading}
+            aria-label="New chat"
+            className="focus-ring flex h-8 w-8 items-center justify-center rounded-lg border border-line text-muted transition-colors hover:border-accent/50 hover:text-accent disabled:cursor-not-allowed disabled:opacity-40 md:hidden"
+          >
+            <PlusIcon size={16} />
+          </button>
         </div>
       </header>
 
-      <div className="flex-1 overflow-y-auto px-6 py-4">
-        {messages.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-full gap-3 text-center">
-            <div className="w-12 h-12 rounded-2xl bg-[#1f6feb]/20 flex items-center justify-center text-2xl">
-              🛡️
-            </div>
-            <p className="text-[#484f58] text-sm max-w-sm">
-              Ask about security issues, applications, pipeline findings, or platform documentation.
-            </p>
-            <div className="flex gap-2 flex-wrap justify-center mt-2">
-              {[
-                'Show me all critical security issues',
-                'What apps have the highest risk score?',
-                'Show pipeline findings in payment-service',
-                'How many open issues are there by severity?',
-                'Compare auth-service and payment-service',
-                'What is Log4Shell and are we affected?',
-                'How do I configure the GitHub connector?',
-                'Show a chart of issues by severity',
-              ].map(hint => (
-                <button
-                  key={hint}
-                  onClick={() => handleSend(hint)}
-                  disabled={isLoading}
-                  className="text-xs px-3 py-1.5 rounded-lg border border-[#30363d] text-[#58a6ff] hover:bg-[#161b22] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                >
-                  {hint}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
+      <div className="flex min-h-0 flex-1">
+        <Sidebar onSelect={handleSend} onNewChat={handleNewChat} disabled={isLoading} />
 
-        {messages.map(msg => (
-          <ChatMessage key={msg.id} message={msg} />
-        ))}
+        <main className="flex min-w-0 flex-1 flex-col">
+          <div className="flex-1 overflow-y-auto px-4 py-6 sm:px-6">
+            <div className="mx-auto h-full max-w-3xl">
+              {messages.length === 0 && <EmptyState onSelect={handleSend} disabled={isLoading} />}
 
-        {isLoading && !messages.some(m => m.isStreaming && m.content.length > 0) && (
-          <div className="flex justify-start mb-4">
-            <div className="bg-[#21262d] rounded-2xl rounded-bl-sm">
-              {streamingStatus ? (
-                <p className="px-4 py-3 text-xs text-[#8b949e] italic">{streamingStatus}</p>
-              ) : (
-                <TypingIndicator />
+              {messages.length > 0 && (
+                <div role="log" aria-label="Conversation">
+                  {messages.map(msg => (
+                    <ChatMessage key={msg.id} message={msg} />
+                  ))}
+
+                  {isAwaitingFirstToken && (
+                    <div className="mb-6 pl-11">
+                      <TypingIndicator status={streamingStatus} />
+                    </div>
+                  )}
+                </div>
               )}
+
+              <div ref={bottomRef} />
             </div>
           </div>
-        )}
 
-        <div ref={bottomRef} />
+          <ChatInput onSend={handleSend} disabled={isLoading} />
+        </main>
       </div>
-
-      <ChatInput onSend={handleSend} disabled={isLoading} />
     </div>
   )
 }
