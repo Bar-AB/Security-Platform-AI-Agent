@@ -7,6 +7,24 @@ citations. A FastAPI backend streams answers to a React chat UI.
 
 Everything runs locally with mock data. The only external dependency is an OpenAI API key.
 
+![Demo: asking the agent how to configure the GitHub connector](assets/demo.gif)
+
+---
+
+## Screenshots
+
+| Live data + charts (MCP) | Documentation answers (RAG) |
+|---|---|
+| ![Top vulnerable applications chart](assets/chart.png) | ![GitHub connector answer from docs](assets/docs-rag.png) |
+
+<details>
+<summary>Home screen and mobile view</summary>
+
+<img src="assets/home.png" alt="Home screen with grouped example questions" width="720">
+<img src="assets/mobile.png" alt="Mobile view" width="240">
+
+</details>
+
 ---
 
 ## Architecture
@@ -49,8 +67,9 @@ Conversation state is kept per session with LangGraph's `MemorySaver`, so follow
   prompts, and closing-tag sanitization of tool/doc output
 - **Charts** — severity distribution and top vulnerable applications, rendered with Matplotlib
   and shown inline in the UI
-- **Streaming UI** — Server-Sent Events with per-stage status updates, query-type and
-  confidence badges, and 8 starter prompts
+- **Streaming UI** — dark security-console chat with Server-Sent Events, per-stage status
+  updates, query-type and confidence badges, a live agent health indicator, and grouped
+  example questions
 - **Observability** — optional LangSmith tracing via environment variables
 
 ---
@@ -116,7 +135,7 @@ How many issues are there by severity?
 Tell me about PIPE-006
 How do I connect Jira to the platform?
 Are there any Jira connector issues?
-Show a chart of issues by severity
+Visualize the top vulnerable applications
 
 > Show me issues in auth-service
 > Now show me payment-service issues
@@ -134,6 +153,7 @@ mcp_client/     MCP client and LangChain tool wrappers
 mock_server/    FastMCP server, Pydantic models, mock data
 rag/            ChromaDB indexer and retrievers
 docs/           markdown knowledge base used by RAG
+assets/         README screenshots and demo GIF
 frontend/       React chat UI
 tests/          pytest suite
 main.py         CLI chat loop
@@ -145,7 +165,7 @@ main.py         CLI chat loop
 
 ```bash
 pytest                              # 182 Python tests
-cd frontend && npx vitest run       # 19 frontend tests
+cd frontend && npx vitest run       # 46 frontend tests
 ruff format --check . && ruff check .
 ```
 
