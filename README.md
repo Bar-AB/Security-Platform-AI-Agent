@@ -13,9 +13,9 @@ Everything runs locally with mock data. The only external dependency is an OpenA
 
 ## Screenshots
 
-| Live data + charts (MCP) | Documentation answers (RAG) |
+| Live data + charts (MCP) | Reasoning over earlier results (synthesis) |
 |---|---|
-| ![Top vulnerable applications chart](assets/chart.png) | ![GitHub connector answer from docs](assets/docs-rag.png) |
+| ![Top vulnerable applications chart](assets/chart.png) | ![Follow-up question answered from conversation history](assets/synthesis.png) |
 
 <details>
 <summary>Home screen and mobile view</summary>
