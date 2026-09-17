@@ -17,6 +17,10 @@ Everything runs locally with mock data. The only external dependency is an OpenA
 |---|---|
 | ![Top vulnerable applications chart](assets/chart.png) | ![Follow-up question answered from conversation history](assets/synthesis.png) |
 
+**LangSmith trace** — every graph node, LLM call, latency, and token count for a single query:
+
+![LangSmith trace of a data query: classify_query, mcp_node, format_response, validate_response](assets/langsmith-trace.png)
+
 <details>
 <summary>Home screen and mobile view</summary>
 
