@@ -100,6 +100,22 @@ Conversation state is kept per session with LangGraph's `MemorySaver`, so follow
 
 ## Quickstart
 
+### Docker (one command)
+
+Requires Docker with Compose.
+
+```bash
+cp .env.example .env               # then set OPENAI_API_KEY
+docker compose up --build
+```
+
+Open http://localhost:5173. Compose starts the mock server, then the API once the mock server is
+healthy, then the UI once the API is healthy. The RAG index is kept in a Docker volume, so it is
+only built on the first start. Stop with `Ctrl+C`, or `docker compose down` (add `-v` to also
+delete the index).
+
+### Local
+
 Requires Python 3.12+ and Node.js.
 
 ```bash
@@ -157,6 +173,7 @@ assets/         README screenshots and demo GIF
 frontend/       React chat UI
 tests/          pytest suite
 main.py         CLI chat loop
+docker-compose.yml   runs the mock server, API, and UI together
 ```
 
 ---
@@ -164,7 +181,7 @@ main.py         CLI chat loop
 ## Tests
 
 ```bash
-pytest                              # 182 Python tests
+pytest                              # 184 Python tests
 cd frontend && npx vitest run       # 46 frontend tests
 ruff format --check . && ruff check .
 ```

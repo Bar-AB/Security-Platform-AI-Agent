@@ -1,4 +1,7 @@
+import pytest
+
 from mock_server.data import MOCK_APPLICATIONS, MOCK_ISSUES, MOCK_PIPELINE_ISSUES
+from mock_server.main import _TransportSecurityFactory
 from mock_server.models import IssueStatus, Severity
 
 
@@ -45,3 +48,18 @@ class TestMockServerData:
         result = [i for i in MOCK_PIPELINE_ISSUES if i.branch == "main"]
         assert all(i.branch == "main" for i in result)
         assert len(result) >= 2
+
+
+class TestTransportSecurityFactory:
+    def test_allows_only_local_hosts_by_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("MCP_ALLOWED_HOSTS", raising=False)
+        settings = _TransportSecurityFactory.build()
+        assert settings.enable_dns_rebinding_protection
+        assert settings.allowed_hosts == ["127.0.0.1:*", "localhost:*", "[::1]:*"]
+
+    def test_adds_hosts_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("MCP_ALLOWED_HOSTS", "mock-server, other-host")
+        settings = _TransportSecurityFactory.build()
+        assert "mock-server:*" in settings.allowed_hosts
+        assert "other-host:*" in settings.allowed_hosts
+        assert "http://mock-server:*" in settings.allowed_origins

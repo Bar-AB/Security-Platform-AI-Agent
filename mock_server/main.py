@@ -1,6 +1,8 @@
 import logging
+import os
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
@@ -53,7 +55,24 @@ _PIPELINE_DESCRIPTION = (
     "- limit: max number of results to return"
 )
 
-_mcp = FastMCP("security-platform")
+
+class _TransportSecurityFactory:
+    _LOCAL_HOSTS = ["127.0.0.1", "localhost", "[::1]"]
+
+    @classmethod
+    def build(cls) -> TransportSecuritySettings:
+        extra_hosts = [
+            host.strip() for host in os.getenv("MCP_ALLOWED_HOSTS", "").split(",") if host.strip()
+        ]
+        hosts = cls._LOCAL_HOSTS + extra_hosts
+        return TransportSecuritySettings(
+            enable_dns_rebinding_protection=True,
+            allowed_hosts=[f"{host}:*" for host in hosts],
+            allowed_origins=[f"http://{host}:*" for host in hosts],
+        )
+
+
+_mcp = FastMCP("security-platform", transport_security=_TransportSecurityFactory.build())
 
 
 @_mcp.tool(description=_ISSUES_DESCRIPTION)
